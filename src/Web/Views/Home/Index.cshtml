@@ -1,8 +1,12 @@
 ﻿@{
-    ViewData["Title"] = "Home Page";
+    ViewData["Title"] = "Home";
 }
 
 <div class="text-center">
-    <h1 class="display-4">Welcome</h1>
-    <p>Learn about <a href="https://learn.microsoft.com/aspnet/core">building Web apps with ASP.NET Core</a>.</p>
+    <h1 class="display-4">Rakit</h1>
+    <p class="lead">Platform low-code untuk merakit page dan workflow di atas SQL Server. Fase F0: fondasi.</p>
+    <p>
+        <a class="btn btn-primary" asp-area="Builder" asp-controller="Schema" asp-action="Index">Schema Browser</a>
+        <a class="btn btn-outline-secondary" asp-area="Admin" asp-controller="Health" asp-action="Index">Database Health</a>
+    </p>
 </div>

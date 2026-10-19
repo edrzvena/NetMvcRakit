@@ -1,0 +1,34 @@
+@model DbHealthReport
+@{
+    ViewData["Title"] = "Database Health";
+}
+
+<h1 class="h3 mb-3">Database Health</h1>
+
+<div class="alert @(Model.IsHealthy ? "alert-success" : "alert-danger")" role="status">
+    @(Model.IsHealthy ? "Semua koneksi database sehat." : "Ada koneksi database yang bermasalah.")
+</div>
+
+<table class="table table-sm align-middle">
+    <thead>
+        <tr>
+            <th>Koneksi</th>
+            <th>Status</th>
+            <th class="text-end">Latensi (ms)</th>
+            <th>Keterangan</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var c in Model.Connections)
+        {
+            <tr>
+                <td>@c.Name</td>
+                <td>
+                    <span class="badge @(c.IsHealthy ? "bg-success" : "bg-danger")">@(c.IsHealthy ? "Sehat" : "Tidak sehat")</span>
+                </td>
+                <td class="text-end">@c.Latency.TotalMilliseconds.ToString("0")</td>
+                <td>@c.Error</td>
+            </tr>
+        }
+    </tbody>
+</table>

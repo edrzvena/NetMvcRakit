@@ -1,0 +1,65 @@
+@model SchemaIndexViewModel
+@{
+    ViewData["Title"] = "Schema Browser";
+}
+
+<h1 class="h3 mb-3">Schema Browser</h1>
+
+<ul class="nav nav-tabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="tables-tab" data-bs-toggle="tab" data-bs-target="#tables" type="button" role="tab" aria-controls="tables" aria-selected="true">
+            Tables / Views <span class="badge bg-secondary">@Model.Tables.Count</span>
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="procs-tab" data-bs-toggle="tab" data-bs-target="#procs" type="button" role="tab" aria-controls="procs" aria-selected="false">
+            Stored Procedures <span class="badge bg-secondary">@Model.Procedures.Count</span>
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content pt-3">
+    <div class="tab-pane fade show active" id="tables" role="tabpanel" aria-labelledby="tables-tab">
+        @if (Model.Tables.Count == 0)
+        {
+            <p class="text-muted">Tidak ada tabel atau view di schema yang diizinkan.</p>
+        }
+        else
+        {
+            <table class="table table-sm table-hover">
+                <thead><tr><th>Schema</th><th>Nama</th><th>Jenis</th></tr></thead>
+                <tbody>
+                    @foreach (var t in Model.Tables)
+                    {
+                        <tr>
+                            <td>@t.Schema</td>
+                            <td><a asp-area="Builder" asp-controller="Schema" asp-action="Table" asp-route-schema="@t.Schema" asp-route-name="@t.Name">@t.Name</a></td>
+                            <td>@t.Kind</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+    <div class="tab-pane fade" id="procs" role="tabpanel" aria-labelledby="procs-tab">
+        @if (Model.Procedures.Count == 0)
+        {
+            <p class="text-muted">Tidak ada stored procedure di schema yang diizinkan.</p>
+        }
+        else
+        {
+            <table class="table table-sm table-hover">
+                <thead><tr><th>Schema</th><th>Nama</th></tr></thead>
+                <tbody>
+                    @foreach (var p in Model.Procedures)
+                    {
+                        <tr>
+                            <td>@p.Schema</td>
+                            <td><a asp-area="Builder" asp-controller="Schema" asp-action="Procedure" asp-route-schema="@p.Schema" asp-route-name="@p.Name">@p.Name</a></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+</div>

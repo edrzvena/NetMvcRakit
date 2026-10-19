@@ -1,0 +1,56 @@
+@model ProcedureDetail
+@{
+    ViewData["Title"] = $"{Model.Schema}.{Model.Name}";
+}
+
+<p><a asp-area="Builder" asp-controller="Schema" asp-action="Index">&larr; Schema Browser</a></p>
+<h1 class="h3 mb-3">@Model.Schema.@Model.Name</h1>
+
+<h2 class="h5">Parameter</h2>
+@if (Model.Parameters.Count == 0)
+{
+    <p class="text-muted">Tidak ada parameter.</p>
+}
+else
+{
+    <table class="table table-sm">
+        <thead><tr><th>Nama</th><th>Tipe</th><th>Arah</th><th>Default</th></tr></thead>
+        <tbody>
+            @foreach (var p in Model.Parameters)
+            {
+                <tr>
+                    <td>@p.Name</td>
+                    <td>@SchemaDisplay.TypeLabel(p.DataType, p.MaxLength, p.Precision, p.Scale)</td>
+                    <td>@(p.IsOutput ? "OUT" : "IN")</td>
+                    <td>@(p.HasDefault ? "ya" : "tidak")</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+<h2 class="h5 mt-4">Result set pertama</h2>
+@if (Model.ResultSetWarning is not null)
+{
+    <div class="alert alert-warning" role="alert">@Model.ResultSetWarning</div>
+}
+else if (Model.ResultColumns.Count == 0)
+{
+    <p class="text-muted">Prosedur ini tidak mengembalikan result set.</p>
+}
+else
+{
+    <table class="table table-sm">
+        <thead><tr><th>Kolom</th><th>Tipe</th><th>Nullable</th></tr></thead>
+        <tbody>
+            @foreach (var c in Model.ResultColumns)
+            {
+                <tr>
+                    <td>@c.Name</td>
+                    <td>@c.DataType</td>
+                    <td>@(c.IsNullable ? "ya" : "tidak")</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
