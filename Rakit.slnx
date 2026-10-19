@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/db/">
+    <Project Path="db/Rakit.Migrations/Rakit.Migrations.csproj" />
+  </Folder>
+  <Folder Name="/src/" />
+  <Folder Name="/src/Core/">
+    <Project Path="src/Core/Rakit.Core.csproj" />
+  </Folder>
+  <Folder Name="/src/Web/">
+    <Project Path="src/Web/Rakit.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Rakit.Core.Tests/Rakit.Core.Tests.csproj" />
+  </Folder>
+</Solution>
