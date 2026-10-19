@@ -1,0 +1,146 @@
+@model DataSourceFormViewModel
+@{
+    ViewData["Title"] = Model.IsEdit ? $"Ubah {Model.Code}" : "Data Source baru";
+}
+
+<p><a asp-area="Builder" asp-controller="DataSource" asp-action="Index">&larr; Data Source</a></p>
+<h1 class="h3 mb-3">
+    @(Model.IsEdit ? "Ubah Data Source" : "Data Source baru")
+    @if (Model.Version is not null)
+    {
+        <small class="text-muted fs-6">versi @Model.Version, menyimpan akan membuat versi @(Model.Version + 1)</small>
+    }
+</h1>
+
+<div asp-validation-summary="All" class="alert alert-danger"></div>
+
+<form id="ds-form" method="post" asp-area="Builder" asp-controller="DataSource" asp-action="@(Model.IsEdit ? "Edit" : "Create")" asp-route-id="@Model.Id">
+    <input type="hidden" id="DefinitionJson" name="DefinitionJson" value="@Model.DefinitionJson" />
+
+    <div class="row g-3 mb-3">
+        <div class="col-md-3">
+            <label class="form-label" for="Code">Code</label>
+            <input class="form-control" id="Code" name="Code" value="@Model.Code" maxlength="50" required />
+            <div class="form-text">2-50 karakter, diawali huruf (huruf/angka/_/-).</div>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label" for="Name">Nama</label>
+            <input class="form-control" id="Name" name="Name" value="@Model.Name" maxlength="200" required />
+        </div>
+        <div class="col-md-3">
+            <label class="form-label" for="timeoutSeconds">Timeout (detik)</label>
+            <input class="form-control" type="number" id="timeoutSeconds" min="1" max="300" value="30" />
+            <div class="form-text">1-300.</div>
+        </div>
+    </div>
+
+    <div class="mb-3">
+        <span class="form-label d-block">Mode</span>
+        <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" name="Mode" id="mode-table" value="Table" @(Model.Mode == Rakit.Core.DataSources.DataSourceMode.Table ? "checked" : "") />
+            <label class="form-check-label" for="mode-table">Table</label>
+        </div>
+        <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" name="Mode" id="mode-query" value="Query" @(Model.Mode == Rakit.Core.DataSources.DataSourceMode.Query ? "checked" : "") />
+            <label class="form-check-label" for="mode-query">Query</label>
+        </div>
+        <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" disabled id="mode-sp" />
+            <label class="form-check-label text-muted" for="mode-sp">Stored Procedure (segera)</label>
+        </div>
+    </div>
+
+    @* ---------------- Table mode ---------------- *@
+    <section id="panel-table" class="border rounded p-3 mb-3">
+        <h2 class="h5">Sumber tabel</h2>
+        @if (Model.TablesUnavailable)
+        {
+            <div class="alert alert-warning">Daftar tabel tidak dapat dibaca saat ini (database tidak tersedia).</div>
+        }
+        <div class="mb-3">
+            <label class="form-label" for="tableSelect">Tabel / View</label>
+            <select class="form-select" id="tableSelect">
+                <option value="">- pilih -</option>
+                @foreach (var t in Model.Tables)
+                {
+                    <option value="@($"{t.Schema}.{t.Name}")" data-schema="@t.Schema" data-name="@t.Name">@t.Schema.@t.Name (@t.Kind)</option>
+                }
+            </select>
+        </div>
+
+        <div class="mb-3">
+            <span class="form-label d-block">Kolom ditampilkan</span>
+            <div id="columns" class="d-flex flex-wrap gap-3"><span class="text-muted">Pilih tabel dulu.</span></div>
+            <div class="form-text">Semua dicentang = semua kolom.</div>
+        </div>
+
+        <div class="mb-3">
+            <span class="form-label d-block">Filter</span>
+            <div id="filters"></div>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="add-filter">+ Filter</button>
+            <div class="form-text">
+                Nilai filter diambil dari parameter di bawah. Parameter kosong (null) = filter dilewati.
+                Operator <code>like</code> berarti "mengandung". Nama <code>Skip</code>, <code>Take</code>, <code>Search</code> dicadangkan.
+            </div>
+        </div>
+
+        <div class="mb-0">
+            <span class="form-label d-block">Urutan</span>
+            <div id="sorts"></div>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="add-sort">+ Urutan</button>
+            <div id="sort-warning" class="form-text text-warning d-none">
+                Tanpa urutan, isi halaman (paging) tidak dijamin konsisten. Sebaiknya isi minimal satu.
+            </div>
+        </div>
+    </section>
+
+    @* ---------------- Query mode ---------------- *@
+    <section id="panel-query" class="border rounded p-3 mb-3">
+        <h2 class="h5">Query</h2>
+        @if (!Model.AllowRawQuery)
+        {
+            <div class="alert alert-info">
+                Query mentah dinonaktifkan (<code>Rakit:Db:AllowRawQuery = false</code>): boleh disimpan, belum bisa dijalankan.
+            </div>
+        }
+        <div class="mb-3">
+            <label class="form-label" for="query">SQL</label>
+            <textarea class="form-control font-monospace" id="query" rows="8" spellcheck="false"></textarea>
+            <div class="form-text">
+                Pakai <code>{namaParam}</code> untuk nilai (otomatis jadi parameter ter-binding, jangan diberi tanda kutip).
+                Token <code>@@Skip</code>, <code>@@Take</code>, <code>@@OrderBy</code>, <code>@@Search</code>, <code>@@IsCount</code> tersedia otomatis.
+            </div>
+        </div>
+        <div class="mb-3">
+            <label class="form-label" for="statementType">Jenis statement</label>
+            <select class="form-select w-auto" id="statementType" name="StatementType">
+                <option value="Query" selected="@(Model.StatementType == Rakit.Core.DataSources.StatementType.Query)">Query (mengembalikan baris)</option>
+                <option value="Command" selected="@(Model.StatementType == Rakit.Core.DataSources.StatementType.Command)">Command (insert/update/delete)</option>
+            </select>
+            @if (!Model.AllowWrite)
+            {
+                <div class="form-text text-warning">Command dinonaktifkan (<code>Rakit:Db:AllowWrite = false</code>).</div>
+            }
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="detect-params">Deteksi parameter dari query</button>
+    </section>
+
+    @* ---------------- Parameters ---------------- *@
+    <section class="border rounded p-3 mb-3">
+        <h2 class="h5">Parameter mapping</h2>
+        <div id="params"></div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="add-param">+ Parameter</button>
+        <div class="form-text">
+            <strong>Key</strong>: nama field untuk QueryString, FormField, RouteValue, UserClaim; <code>stepCode.outputName</code> untuk StepOutput.
+            <strong>Value</strong>: nilai tetap untuk Constant, ekspresi (<code>@@now</code>, <code>@@utcnow</code>, <code>@@today</code>) untuk Expression,
+            atau nilai cadangan bila sumbernya kosong.
+        </div>
+    </section>
+
+    <button type="submit" class="btn btn-primary">Simpan</button>
+    <a class="btn btn-outline-secondary" asp-area="Builder" asp-controller="DataSource" asp-action="Index">Batal</a>
+</form>
+
+@section Scripts {
+    <script src="~/js/datasource-form.js" asp-append-version="true"></script>
+}

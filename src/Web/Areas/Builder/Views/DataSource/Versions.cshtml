@@ -1,0 +1,30 @@
+@model DataSourceVersionsViewModel
+@{
+    ViewData["Title"] = $"Riwayat {Model.Current.Code}";
+}
+
+<p><a asp-area="Builder" asp-controller="DataSource" asp-action="Index">&larr; Data Source</a></p>
+<h1 class="h3 mb-1">Riwayat: <code>@Model.Current.Code</code></h1>
+<p class="text-muted">Versi saat ini: @Model.Current.Version. Setiap penyimpanan membuat versi baru; versi lama hanya untuk dilihat.</p>
+
+<table class="table table-sm align-top">
+    <thead><tr><th>Versi</th><th>Waktu</th><th>Oleh</th><th>Nama</th><th>Mode</th><th>Definisi</th></tr></thead>
+    <tbody>
+        @foreach (var v in Model.Versions)
+        {
+            <tr>
+                <td>@v.Version</td>
+                <td class="text-nowrap">@v.Changed.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                <td>@v.ChangedBy</td>
+                <td>@v.Name</td>
+                <td>@DataSourceDisplay.ModeLabel(v.Mode) / @v.StatementType</td>
+                <td>
+                    <details>
+                        <summary>lihat</summary>
+                        <pre class="small mb-0">@DataSourceDisplay.PrettyJson(v.Definition)</pre>
+                    </details>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
