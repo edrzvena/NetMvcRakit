@@ -30,6 +30,7 @@ public static class DependencyInjection
         services.AddSingleton<ISchemaBrowserService, SchemaBrowserService>();
         services.AddSingleton<IDataSourceRepository, DataSourceRepository>();
         services.AddSingleton<ISqlExecutionService, SqlExecutionService>();
+        services.AddSingleton<IParameterResolver, ParameterResolver>();
 
         return services;
     }

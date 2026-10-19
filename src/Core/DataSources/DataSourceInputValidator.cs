@@ -60,6 +60,11 @@ public static partial class DataSourceInputValidator
                 errors.Add($"Nama parameter '{p.Name}' tidak valid (huruf/angka/_, tidak diawali angka).");
             else if (!names.Add(p.Name!))
                 errors.Add($"Nama parameter '{p.Name}' dipakai lebih dari sekali.");
+
+            if (ParameterResolver.RequiresKey(p.Source) && string.IsNullOrWhiteSpace(p.Key))
+                errors.Add($"Parameter '{p.Name}': sumber {p.Source} membutuhkan Key.");
+            if (p.Source == ParameterSource.Expression && !ParameterResolver.IsKnownExpression(p.Value))
+                errors.Add($"Parameter '{p.Name}': ekspresi '{p.Value}' tidak dikenal. Yang didukung: {string.Join(", ", ParameterResolver.KnownExpressions)}.");
         }
 
         return errors;
