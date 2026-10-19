@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Rakit.Core.Config;
 using Rakit.Core.Data;
 using Rakit.Core.Health;
+using Rakit.Core.Schema;
 
 namespace Rakit.Core;
 
@@ -24,6 +25,7 @@ public static class DependencyInjection
 
         services.AddSingleton<IDbConnectionFactory, DbConnectionFactory>();
         services.AddSingleton<IDbHealthService, DbHealthService>();
+        services.AddSingleton<ISchemaBrowserService, SchemaBrowserService>();
 
         return services;
     }
