@@ -32,6 +32,7 @@ public static class DependencyInjection
         services.AddSingleton<ISqlExecutionService, SqlExecutionService>();
         services.AddSingleton<IParameterResolver, ParameterResolver>();
         services.AddSingleton<ITableQueryBuilder, TableQueryBuilder>();
+        services.AddSingleton<IDataSourceService, DataSourceService>();
 
         return services;
     }
