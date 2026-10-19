@@ -4,6 +4,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddControllersWithViews();
+// fetch() calls send the anti-forgery token in this header (the form's hidden field supplies the value).
+builder.Services.AddAntiforgery(o => o.HeaderName = "RequestVerificationToken");
 builder.Services.AddRakitCore(builder.Configuration);
 
 var app = builder.Build();

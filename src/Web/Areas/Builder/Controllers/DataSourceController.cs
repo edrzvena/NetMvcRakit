@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Rakit.Core.Config;
 using Rakit.Core.DataSources;
 using Rakit.Core.Schema;
+using Rakit.Core.Sql;
 using Rakit.Web.Areas.Builder.Models;
 
 namespace Rakit.Web.Areas.Builder.Controllers;
@@ -12,6 +13,7 @@ namespace Rakit.Web.Areas.Builder.Controllers;
 [Area("Builder")]
 public class DataSourceController(
     IDataSourceRepository repository,
+    IDataSourceService dataSources,
     ISchemaBrowserService schema,
     IOptions<RakitDbOptions> options,
     ILogger<DataSourceController> logger) : Controller
@@ -107,6 +109,79 @@ public class DataSourceController(
         }
         return RedirectToAction(nameof(Index));
     });
+
+    // ---- preview (builder screen: the database's own error text is returned in "detail") ---------
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> Preview([FromBody] DataSourcePreviewRequest request, CancellationToken ct)
+    {
+        if (!Enum.TryParse<DataSourceMode>(request.Mode, ignoreCase: true, out var mode)
+            || !Enum.TryParse<StatementType>(request.StatementType, ignoreCase: true, out var statement)
+            || request.Definition.ValueKind != JsonValueKind.Object)
+            return PreviewError(400, "Permintaan preview tidak valid.");
+
+        DataSourceDefinition definition;
+        try
+        {
+            definition = DataSourceJson.Deserialize(request.Definition.GetRawText());
+        }
+        catch (JsonException)
+        {
+            return PreviewError(400, "Definisi tidak dapat dibaca.");
+        }
+
+        // Same rule as saving: only the active mode's part counts.
+        if (mode == DataSourceMode.Table) definition.Query = null;
+        else definition.Table = null;
+
+        var samples = (request.Samples ?? [])
+            .ToDictionary(kv => kv.Key, kv => string.IsNullOrEmpty(kv.Value) ? null : (object?)kv.Value, StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            var result = await dataSources.PreviewAsync(
+                new DataSourceInput { Mode = mode, StatementType = statement, Definition = definition }, samples, ct);
+
+            return Json(new PreviewResponse(
+                result.ResultSets.Select(s => new PreviewResultSet(
+                    s.Columns,
+                    s.Rows.Select(r => (IReadOnlyList<string?>)r.Select(PreviewFormat.Cell).ToList()).ToList(),
+                    s.Truncated)).ToList(),
+                result.TotalCount,
+                (long)result.Duration.TotalMilliseconds));
+        }
+        catch (DataSourceValidationException ex)
+        {
+            return PreviewError(400, "Definisi belum valid.", errors: ex.Errors);
+        }
+        catch (DataSourceForbiddenException ex)
+        {
+            return PreviewError(403, ex.Message);
+        }
+        catch (Exception ex) when (ex is TableDefinitionException or SqlTemplateException or ArgumentException)
+        {
+            return PreviewError(400, ex.Message);
+        }
+        catch (Exception ex) when (ex is SchemaAccessDeniedException or SchemaObjectNotFoundException)
+        {
+            return PreviewError(400, "Tabel tidak ditemukan atau tidak diizinkan.");
+        }
+        catch (SqlExecutionException ex)
+        {
+            return PreviewError(422, ex.Message, detail: ex.Detail, kind: ex.Kind.ToString());
+        }
+        catch (SqlException ex)
+        {
+            logger.LogError(ex, "Preview could not reach the database.");
+            return PreviewError(503, "Database tidak tersedia.");
+        }
+    }
+
+    private JsonResult PreviewError(int status, string message, IReadOnlyList<string>? errors = null, string? detail = null, string? kind = null)
+    {
+        Response.StatusCode = status;
+        return Json(new { message, errors, detail, kind });
+    }
 
     // ---- helper endpoint for the form ----------------------------------------------------------
 

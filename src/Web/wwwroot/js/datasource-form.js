@@ -153,11 +153,13 @@
             const key = el('input', { class: 'form-control form-control-sm', placeholder: 'key', value: p.key || '' });
             const val = el('input', { class: 'form-control form-control-sm', placeholder: 'value', value: p.value || '' });
             name.addEventListener('input', () => { p.name = name.value.trim(); });
+            name.addEventListener('change', renderSamples);
             src.addEventListener('change', () => { p.source = src.value; });
             key.addEventListener('input', () => { p.key = key.value.trim(); });
             val.addEventListener('input', () => { p.value = val.value; });
             return el('div', { class: 'd-flex gap-2 mb-2' }, [name, src, key, val, removeButton(() => { def.parameters.splice(i, 1); renderParams(); })]);
         }));
+        renderSamples();
     }
     $('add-param').addEventListener('click', () => { def.parameters.push({ name: '', source: 'queryString', key: '', value: '' }); renderParams(); });
 
@@ -172,8 +174,8 @@
         renderParams();
     });
 
-    // ---- submit ----
-    form.addEventListener('submit', () => {
+    // ---- definition (shared by Save and Preview) ----
+    function collectDefinition() {
         const table = currentMode() === 'Table';
         const out = { timeoutSeconds: parseInt($('timeoutSeconds').value, 10) || 30, parameters: [] };
 
@@ -196,8 +198,101 @@
             if (p.value) row.value = p.value;
             return row;
         });
-        definitionInput.value = JSON.stringify(out);
+        return out;
+    }
+
+    form.addEventListener('submit', () => {
+        definitionInput.value = JSON.stringify(collectDefinition());
     });
+
+    // ---- preview ----
+    const sampleValues = {}; // parameter name -> text typed by the builder (kept while the form is open)
+
+    function renderSamples() {
+        const host = $('preview-samples');
+        const names = def.parameters.map((p) => p.name).filter(Boolean);
+        if (names.length === 0) {
+            host.replaceChildren(el('div', { class: 'text-muted small', text: 'Tidak ada parameter: preview jalan tanpa nilai contoh.' }));
+            return;
+        }
+        host.replaceChildren(
+            el('div', { class: 'small text-muted mb-1', text: 'Nilai contoh (kosong = null; filter dengan nilai null dilewati):' }),
+            ...names.map((n) => {
+                const input = el('input', { class: 'form-control form-control-sm', value: sampleValues[n] || '' });
+                input.addEventListener('input', () => { sampleValues[n] = input.value; });
+                return el('div', { class: 'row g-2 mb-1 align-items-center' }, [
+                    el('div', { class: 'col-auto' }, [el('code', { text: n })]),
+                    el('div', { class: 'col-md-4' }, [input]),
+                ]);
+            }));
+    }
+
+    function showMessage(kind, text, extra) {
+        const box = el('div', { class: 'alert alert-' + kind + ' mb-0', role: 'alert' }, [el('div', { text: text })]);
+        (extra || []).forEach((line) => box.appendChild(el('div', { class: 'small', text: line })));
+        $('preview-result').replaceChildren(box);
+    }
+
+    function renderResult(data) {
+        const parts = [];
+        const summary = data.resultSets.map((s) => s.rows.length + (s.truncated ? '+' : '') + ' baris').join(', ');
+        parts.push(el('div', { class: 'small text-muted mb-2', text:
+            (summary || 'tidak ada result set') +
+            (data.totalCount != null ? ' | total ' + data.totalCount : '') +
+            ' | ' + data.durationMs + ' ms' }));
+
+        data.resultSets.forEach((s) => {
+            const head = el('tr', {}, s.columns.map((c) => el('th', { text: c })));
+            const body = s.rows.map((r) => el('tr', {}, r.map((v) =>
+                v === null ? el('td', {}, [el('em', { class: 'text-muted', text: 'NULL' })]) : el('td', { text: v }))));
+            parts.push(el('div', { class: 'table-responsive border mb-2', style: 'max-height: 360px; overflow: auto' }, [
+                el('table', { class: 'table table-sm table-bordered table-striped mb-0' }, [el('thead', {}, [head]), el('tbody', {}, body)]),
+            ]));
+            if (s.truncated) parts.push(el('div', { class: 'small text-warning', text: 'Hasil dipotong: hanya sebagian baris yang ditampilkan.' }));
+            if (s.rows.length === 0) parts.push(el('div', { class: 'small text-muted', text: 'Tidak ada baris.' }));
+        });
+        $('preview-result').replaceChildren(...parts);
+    }
+
+    async function runPreview() {
+        const button = $('run-preview');
+        const statement = currentMode() === 'Table' ? 'Query' : $('statementType').value;
+        const tokenInput = form.querySelector('input[name="__RequestVerificationToken"]');
+        button.disabled = true;
+        $('preview-status').textContent = 'menjalankan...';
+        try {
+            const res = await fetch('/Builder/DataSource/Preview', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    RequestVerificationToken: tokenInput ? tokenInput.value : '',
+                },
+                body: JSON.stringify({
+                    mode: currentMode(),
+                    statementType: statement,
+                    definition: collectDefinition(),
+                    samples: sampleValues,
+                }),
+            });
+
+            let data = null;
+            try { data = await res.json(); } catch (e) { /* non-JSON body (e.g. 400 from anti-forgery) */ }
+
+            if (res.ok && data) { renderResult(data); return; }
+            if (!data) { showMessage('danger', 'Preview gagal (HTTP ' + res.status + '). Muat ulang halaman lalu coba lagi.'); return; }
+
+            const lines = [].concat(data.errors || []);
+            if (data.detail) lines.push('Detail database: ' + data.detail);
+            showMessage(res.status === 403 ? 'info' : 'danger', data.message || 'Preview gagal.', lines);
+        } catch (e) {
+            showMessage('danger', 'Preview gagal: server tidak dapat dihubungi.');
+        } finally {
+            button.disabled = false;
+            $('preview-status').textContent = '';
+        }
+    }
+    $('run-preview').addEventListener('click', runPreview);
 
     // ---- initial state ----
     if (def.table && def.table.schema) {

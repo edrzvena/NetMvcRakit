@@ -137,6 +137,19 @@
         </div>
     </section>
 
+    @* ---------------- Preview ---------------- *@
+    <section id="panel-preview" class="border rounded p-3 mb-3">
+        <h2 class="h5">Preview</h2>
+        <div id="preview-samples" class="mb-2"></div>
+        <button type="button" class="btn btn-sm btn-success" id="run-preview">Run Preview</button>
+        <span id="preview-status" class="ms-2 text-muted small" aria-live="polite"></span>
+        <div id="preview-result" class="mt-3" aria-live="polite"></div>
+        <div class="form-text">
+            Memakai definisi yang sedang diisi di form (tanpa perlu disimpan), maksimal 50 baris, hanya statement Query.
+            Pesan error database ditampilkan lengkap di sini karena ini layar builder.
+        </div>
+    </section>
+
     <button type="submit" class="btn btn-primary">Simpan</button>
     <a class="btn btn-outline-secondary" asp-area="Builder" asp-controller="DataSource" asp-action="Index">Batal</a>
 </form>
