@@ -6,6 +6,7 @@ using Rakit.Core.Data;
 using Rakit.Core.DataSources;
 using Rakit.Core.Health;
 using Rakit.Core.Schema;
+using Rakit.Core.Sql;
 
 namespace Rakit.Core;
 
@@ -28,6 +29,7 @@ public static class DependencyInjection
         services.AddSingleton<IDbHealthService, DbHealthService>();
         services.AddSingleton<ISchemaBrowserService, SchemaBrowserService>();
         services.AddSingleton<IDataSourceRepository, DataSourceRepository>();
+        services.AddSingleton<ISqlExecutionService, SqlExecutionService>();
 
         return services;
     }
