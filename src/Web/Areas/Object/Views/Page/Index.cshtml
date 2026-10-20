@@ -1,6 +1,14 @@
+@using Rakit.Core.Modules
 @model Rakit.Core.Modules.Module
 @{
     ViewData["Title"] = Model.Name;
+
+    // The record UI (token, modals) is only emitted for a module that has record actions. Which buttons are really
+    // offered is decided per request by /data (it also depends on Rakit:Db:AllowWrite).
+    var source = Model.Config.Source;
+    var fields = Model.Config.Form.Fields;
+    var hasSave = (source.Insert is not null || source.Update is not null) && fields.Count > 0;
+    var hasDelete = source.Delete is not null;
 }
 
 <h1 class="h3 mb-1">@Model.Name</h1>
@@ -10,7 +18,12 @@
 }
 
 <div id="object-page" data-url="@Url.Action("Data", "Page", new { area = "Object", moduleId = Model.Id })"
+     data-record-url="@Url.Action("RecordInsert", "Page", new { area = "Object", moduleId = Model.Id })"
      data-take="@Model.Config.Display.Take" data-max-take="@Model.Config.Display.MaxTake">
+    @if (hasSave || hasDelete)
+    {
+        @Html.AntiForgeryToken()
+    }
     <form id="search-form" class="row g-2 mb-3" role="search">
         <div class="col-sm-6 col-md-4">
             <label class="visually-hidden" for="search-input">Cari</label>
@@ -20,7 +33,15 @@
             <button type="submit" class="btn btn-sm btn-primary">Cari</button>
             <button type="button" class="btn btn-sm btn-outline-secondary" id="search-clear">Reset</button>
         </div>
+        @if (hasSave)
+        {
+            <div class="col-auto ms-auto">
+                <button type="button" class="btn btn-sm btn-success d-none" id="record-add">+ Tambah</button>
+            </div>
+        }
     </form>
+
+    <div id="page-message" class="alert d-none" role="status"></div>
 
     <div id="page-status" class="small text-muted mb-2" role="status" aria-live="polite">Memuat...</div>
     <div id="page-error" class="alert alert-danger d-none" role="alert"></div>
@@ -36,6 +57,89 @@
         </div>
     </div>
 </div>
+
+@if (hasSave)
+{
+    <div class="modal fade" id="record-modal" tabindex="-1" aria-labelledby="record-title" aria-hidden="true">
+        <div class="modal-dialog">
+            <form class="modal-content" id="record-form" novalidate>
+                <div class="modal-header">
+                    <h2 class="modal-title h5" id="record-title">Data</h2>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Tutup"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="record-alert" class="alert alert-danger d-none" role="alert"></div>
+                    @foreach (var field in fields)
+                    {
+                        var name = field.Name.Trim();
+                        var id = "rf-" + name;
+                        var label = string.IsNullOrWhiteSpace(field.Label) ? name : field.Label.Trim();
+                        <div class="mb-3" data-group>
+                            @if (field.Type == FormFieldType.Boolean)
+                            {
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="@id" name="@name" value="true" data-field="@name"
+                                           data-default="@field.Default" disabled="@field.Readonly" />
+                                    <label class="form-check-label" for="@id">@label</label>
+                                    <div class="invalid-feedback"></div>
+                                </div>
+                            }
+                            else
+                            {
+                                <label class="form-label" for="@id">@(label + (field.Required && !field.Readonly ? " *" : ""))</label>
+                                @if (field.Type == FormFieldType.Textarea)
+                                {
+                                    <textarea class="form-control" id="@id" name="@name" rows="3" data-field="@name" data-default="@field.Default"
+                                              maxlength="@field.MaxLength" disabled="@field.Readonly"></textarea>
+                                }
+                                else
+                                {
+                                    var inputType = field.Type switch
+                                    {
+                                        FormFieldType.Number => "number",
+                                        FormFieldType.Date => "date",
+                                        FormFieldType.DateTime => "datetime-local",
+                                        _ => "text",
+                                    };
+                                    <input class="form-control" type="@inputType" id="@id" name="@name" data-field="@name" data-default="@field.Default"
+                                           step="@(field.Type == FormFieldType.Number ? "any" : null)" maxlength="@field.MaxLength"
+                                           disabled="@field.Readonly" autocomplete="off" />
+                                }
+                                <div class="invalid-feedback"></div>
+                            }
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Batal</button>
+                    <button type="submit" class="btn btn-primary" id="record-save">Simpan</button>
+                </div>
+            </form>
+        </div>
+    </div>
+}
+
+@if (hasDelete)
+{
+    <div class="modal fade" id="delete-modal" tabindex="-1" aria-labelledby="delete-title" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5" id="delete-title">Hapus data</h2>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Tutup"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="delete-alert" class="alert alert-danger d-none" role="alert"></div>
+                    <p class="mb-0" id="delete-text">Hapus data ini?</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Batal</button>
+                    <button type="button" class="btn btn-danger" id="delete-confirm">Hapus</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
 
 @section Scripts {
     <script src="~/js/object-page.js" asp-append-version="true"></script>
