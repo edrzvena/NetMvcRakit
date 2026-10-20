@@ -38,6 +38,10 @@ public static partial class PlaygroundScripts
 
     // ---- scripts for an existing object -------------------------------------------------------
 
+    /// <summary>The quick look: one row, every column. Light enough to run on any table.</summary>
+    public static string SelectOne(PlaygroundObjectDetail d)
+        => "SELECT TOP (1) *\nFROM " + QuoteObject(d.Schema, d.Name) + ";\n";
+
     public static string SelectTop(PlaygroundObjectDetail d, int top = 100)
     {
         var head = $"SELECT TOP ({top.ToString(CultureInfo.InvariantCulture)})";

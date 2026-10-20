@@ -86,7 +86,8 @@ ORDER BY s.name, o.name";
 
         return kind switch
         {
-            "select" => Require(d.Kind is "TABLE" or "VIEW", () => PlaygroundScripts.SelectTop(d)),
+            "select" => Require(d.Kind is "TABLE" or "VIEW", () => PlaygroundScripts.SelectOne(d)),
+            "selectTop" => Require(d.Kind is "TABLE" or "VIEW", () => PlaygroundScripts.SelectTop(d)),
             "insert" => Require(isTable, () => PlaygroundScripts.Insert(d)),
             "update" => Require(isTable, () => PlaygroundScripts.Update(d)),
             "delete" => Require(isTable, () => PlaygroundScripts.Delete(d)),

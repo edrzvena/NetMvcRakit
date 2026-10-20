@@ -56,6 +56,7 @@
 
             <div class="tab-content">
                 <div class="tab-pane fade show active" id="pg-pane-query" role="tabpanel" aria-labelledby="pg-tab-query">
+                    <div class="pg-qtabs" id="pg-qtabs" role="tablist" aria-label="Tab query"></div>
                     <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
                         <button type="button" class="btn btn-primary btn-sm" id="pg-run"><i class="bi bi-play-fill"></i> Jalankan <kbd class="ms-1">Ctrl+Enter</kbd></button>
                         <button type="button" class="btn btn-outline-danger btn-sm d-none" id="pg-cancel"><i class="bi bi-stop-fill"></i> Batal</button>
@@ -84,13 +85,13 @@
                                 <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-clock-history"></i> Riwayat</button>
                                 <ul class="dropdown-menu dropdown-menu-end pg-history" id="pg-history-menu"></ul>
                             </div>
-                            <button type="button" class="btn btn-outline-secondary btn-sm" id="pg-clear" data-bs-toggle="tooltip" title="Kosongkan editor" aria-label="Kosongkan editor"><i class="bi bi-eraser"></i></button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" id="pg-clear" data-bs-toggle="tooltip" title="Kosongkan tab ini" aria-label="Kosongkan tab ini"><i class="bi bi-eraser"></i></button>
                         </div>
                     </div>
 
                     <div class="pg-editor-wrap"><div id="pg-editor" aria-label="Editor SQL"></div></div>
                     <div class="form-text mb-3">
-                        Teks yang dipilih dijalankan sendiri. Pisahkan batch dengan baris <code>GO</code>.
+                        Teks yang dipilih dijalankan sendiri. Pisahkan batch dengan baris <code>GO</code>. Klik kanan di daftar objek untuk <em>Query baru</em>; tombol <i class="bi bi-play-fill"></i> di sebuah tabel menjalankan <code>SELECT TOP (1) *</code> di tab baru.
                         @if (!s.AllowWrite)
                         {
                             <text>Mode hanya baca: <code>INSERT</code>, <code>UPDATE</code>, <code>CREATE</code>, dan sejenisnya ditolak database; prosedur boleh dijalankan, hasilnya selalu di-rollback.</text>

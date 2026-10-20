@@ -58,31 +58,23 @@
         return 'Permintaan gagal (HTTP ' + res.status + '). Muat ulang halaman lalu coba lagi.';
     }
 
-    // ---- editor --------------------------------------------------------------------------------
+    // ---- editor and its tabs ---------------------------------------------------------------------
+    // One Ace editor; every query tab owns an EditSession (text, undo, cursor) and a results box, so switching tabs brings its
+    // own query and its last result back. A script made from the tree opens in a new tab (or fills the active one when empty).
     ace.config.set('basePath', root.dataset.ace);
     const editor = ace.edit('pg-editor');
     const isDark = () => document.documentElement.getAttribute('data-bs-theme') === 'dark';
     const applyTheme = () => editor.setTheme(isDark() ? 'ace/theme/tomorrow_night' : 'ace/theme/chrome');
     applyTheme();
     window.addEventListener('rakit-theme', applyTheme);
-    editor.session.setMode('ace/mode/sql');
-    editor.session.setUseWrapMode(false);
     editor.setOptions({
         fontSize: 13,
         showPrintMargin: false,
-        tabSize: 4,
-        useSoftTabs: true,
         enableBasicAutocompletion: true,
         enableLiveAutocompletion: true,
         enableSnippets: false,
     });
     editor.renderer.setScrollMargin(6, 6);
-    editor.setValue(store.get('rakit-pg-draft') || 'SELECT TOP (10) * FROM app.Customers;\n', -1);
-    let draftTimer = 0;
-    editor.session.on('change', () => {
-        clearTimeout(draftTimer);
-        draftTimer = setTimeout(() => store.set('rakit-pg-draft', editor.getValue()), 400);
-    });
     editor.commands.addCommand({
         name: 'rakit-run', bindKey: { win: 'Ctrl-Enter', mac: 'Command-Enter' }, exec: () => run(), readOnly: true,
     });
@@ -97,27 +89,142 @@
         },
     });
 
-    /** Puts text into the editor: replaces an empty editor, otherwise appends it and selects it so Ctrl+Enter runs just that. */
-    function putScript(text) {
-        const current = editor.getValue();
-        let startRow = 0;
-        if (current.trim() === '') {
-            editor.setValue(text, -1);
-        } else {
-            // one blank line between the old text and the new script
-            const separator = current.endsWith('\n') ? '\n' : '\n\n';
-            startRow = current.split('\n').length + (current.endsWith('\n') ? 0 : 1);
-            const last = editor.session.getLength() - 1;
-            editor.session.insert({ row: last, column: editor.session.getLine(last).length }, separator + text);
-        }
-        const lastRow = editor.session.getLength() - 1;
-        editor.selection.setSelectionRange({
-            start: { row: startRow, column: 0 },
-            end: { row: lastRow, column: editor.session.getLine(lastRow).length },
+    const TABS_KEY = 'rakit-pg-tabs';
+    const MAX_TABS = 12;
+    const tabs = [];
+    let active = null;
+    let tabCounter = 0;
+    let saveTimer = 0;
+    const tabStrip = $('pg-qtabs');
+
+    function saveTabs() {
+        store.set(TABS_KEY, JSON.stringify({
+            active: tabs.indexOf(active), counter: tabCounter,
+            tabs: tabs.map((t) => ({ title: t.title, sql: t.session.getValue() })),
+        }));
+    }
+    function scheduleSave() {
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(saveTabs, 400);
+    }
+    window.addEventListener('pagehide', saveTabs);
+
+    /** A new tab (not shown yet). `title` null = "Query N". */
+    function createTab(text, title) {
+        const session = ace.createEditSession(text, 'ace/mode/sql');
+        session.setUseWrapMode(false);
+        session.setTabSize(4);
+        session.setUseSoftTabs(true);
+        const tab = {
+            id: ++uidCounter, title: title || 'Query ' + (++tabCounter), session: session,
+            results: el('div', { class: 'pg-tab-results' }, [el('div', { class: 'text-muted small', text: 'Hasil muncul di sini.' })]),
+            controller: null, ran: false, edited: false, silent: false,
+        };
+        session.on('change', () => { if (!tab.silent) tab.edited = true; scheduleSave(); });
+        tabs.push(tab);
+        return tab;
+    }
+    let uidCounter = 0;
+
+    function renderTabs() {
+        const nodes = tabs.map((t) => {
+            const label = el('button', {
+                type: 'button', class: 'pg-qtab-label', role: 'tab', 'aria-selected': t === active ? 'true' : 'false',
+                title: t.title + ' (klik dua kali untuk ganti nama)',
+            }, [t.controller ? el('span', { class: 'spinner-border spinner-border-sm me-1', 'aria-hidden': 'true' }) : null, t.title]);
+            label.addEventListener('click', () => activate(t, true));
+            label.addEventListener('dblclick', () => renameTab(t));
+            label.addEventListener('auxclick', (ev) => { if (ev.button === 1) { ev.preventDefault(); closeTab(t); } });
+            const close = el('button', { type: 'button', class: 'pg-qtab-close', title: 'Tutup tab', 'aria-label': 'Tutup tab ' + t.title }, [icon('bi-x-lg')]);
+            close.addEventListener('click', () => closeTab(t));
+            return el('div', { class: 'pg-qtab' + (t === active ? ' active' : '') }, [label, close]);
         });
-        editor.scrollToLine(startRow, true, true, () => {});
-        editor.focus();
+        const add = el('button', { type: 'button', class: 'pg-qtab-add', title: 'Query baru', 'aria-label': 'Query baru' }, [icon('bi-plus-lg')]);
+        add.addEventListener('click', () => newBlank());
+        tabStrip.replaceChildren(...nodes, add);
+        const current = tabStrip.querySelector('.pg-qtab.active');
+        if (current && current.scrollIntoView) current.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+
+    function syncRun() {
+        const busy = !!(active && active.controller);
+        $('pg-run').disabled = busy;
+        $('pg-cancel').classList.toggle('d-none', !busy);
+    }
+
+    function activate(tab, focus) {
+        active = tab;
+        editor.setSession(tab.session);
+        $('pg-results').replaceChildren(tab.results);
+        renderTabs();
+        syncRun();
+        scheduleSave();
+        if (focus) editor.focus();
+    }
+
+    function renameTab(tab) {
+        const name = window.prompt('Nama tab', tab.title);
+        if (name === null || name.trim() === '') return;
+        tab.title = name.trim().slice(0, 40);
+        renderTabs();
+        scheduleSave();
+    }
+
+    function closeTab(tab) {
+        // only a query that was typed and never run is worth asking about
+        if (tab.edited && !tab.ran && tab.session.getValue().trim() !== ''
+            && !window.confirm('Tab "' + tab.title + '" berisi query yang belum dijalankan. Tutup?')) return;
+        if (tab.controller) tab.controller.abort();
+        const index = tabs.indexOf(tab);
+        tabs.splice(index, 1);
+        if (tabs.length === 0) activate(createTab('', null), true);
+        else if (active === tab) activate(tabs[Math.min(index, tabs.length - 1)], true);
+        else { renderTabs(); scheduleSave(); }
+        tab.session.destroy();
+    }
+
+    /** An empty tab, ready to type in. */
+    function newBlank() {
+        if (tabs.length >= MAX_TABS) { showNotice('warning', 'Sudah ada ' + MAX_TABS + ' tab. Tutup beberapa dulu.'); return null; }
+        const tab = createTab('', null);
+        activate(tab, true);
         $('pg-tab-query').click();
+        return tab;
+    }
+
+    /** Opens a generated script: in the active tab when that is empty and idle, otherwise in a new tab named `title`. */
+    function openScript(title, text, thenRun) {
+        let tab = active && !active.controller && active.session.getValue().trim() === '' ? active : null;
+        if (tab) {
+            tab.title = title;
+        } else {
+            if (tabs.length >= MAX_TABS) { showNotice('warning', 'Sudah ada ' + MAX_TABS + ' tab. Tutup beberapa dulu.'); return null; }
+            tab = createTab('', title);
+        }
+        tab.silent = true;
+        tab.session.setValue(text);
+        tab.silent = false;
+        tab.edited = false;
+        tab.ran = false;
+        activate(tab, true);
+        editor.selection.clearSelection();
+        editor.moveCursorTo(0, 0);
+        $('pg-tab-query').click();
+        if (thenRun) run();
+        return tab;
+    }
+
+    function restoreTabs() {
+        let saved = null;
+        try { saved = JSON.parse(store.get(TABS_KEY) || 'null'); } catch (e) { saved = null; }
+        if (saved && Array.isArray(saved.tabs) && saved.tabs.length > 0) {
+            tabCounter = Number(saved.counter) || saved.tabs.length;
+            saved.tabs.slice(0, MAX_TABS).forEach((t) => { createTab(String((t && t.sql) || ''), String((t && t.title) || 'Query').slice(0, 40)).ran = true; });
+            activate(tabs[Math.min(Math.max(0, Number(saved.active) || 0), tabs.length - 1)]);
+        } else {
+            // the single draft of the one-editor version, or a sample
+            activate(createTab(store.get('rakit-pg-draft') || 'SELECT TOP (10) * FROM app.Customers;\n', null));
+        }
     }
 
     // ---- history -------------------------------------------------------------------------------
@@ -152,7 +259,6 @@
     $('pg-clear').addEventListener('click', () => { editor.setValue('', -1); editor.focus(); });
 
     // ---- running -------------------------------------------------------------------------------
-    let controller = null;
     const rollbackBox = $('pg-rollback');
     if (rollbackBox) {
         rollbackBox.checked = store.get('rakit-pg-rollback') === '1';
@@ -167,18 +273,20 @@
     }
 
     async function run() {
-        if (controller) return;
+        const tab = active;
+        if (!tab || tab.controller) return;
         const selected = editor.getSelectedText();
         const useSelection = selected.trim() !== '';
         const sql = useSelection ? selected : editor.getValue();
-        if (sql.trim() === '') { showNotice('warning', 'Tulis SQL dulu.'); return; }
+        if (sql.trim() === '') { showNotice('warning', 'Tulis SQL dulu.', tab); return; }
         const lineOffset = useSelection ? editor.getSelectionRange().start.row : 0;
 
-        editor.session.clearAnnotations();
-        controller = new AbortController();
-        $('pg-run').disabled = true;
-        $('pg-cancel').classList.remove('d-none');
-        showNotice('secondary', 'Menjalankan...');
+        tab.session.clearAnnotations();
+        tab.controller = new AbortController();
+        tab.ran = true;
+        renderTabs();
+        syncRun();
+        showNotice('secondary', 'Menjalankan...', tab);
         addHistory(sql);
 
         try {
@@ -187,32 +295,33 @@
                 maxRows: clampInt($('pg-maxrows'), 1, settings.maxRows, settings.defaultRows),
                 timeoutSeconds: clampInt($('pg-timeout'), 1, settings.maxTimeout, settings.timeout),
                 rollback: !!(rollbackBox && rollbackBox.checked),
-            }, controller.signal);
-            if (res.ok && res.data) renderRun(res.data, lineOffset);
+            }, tab.controller.signal);
+            if (res.ok && res.data) renderRun(res.data, lineOffset, tab);
             else {
                 let text = failureText(res);
                 if (res.data && res.data.line) text += ' (baris ' + (res.data.line + lineOffset) + ')';
-                showNotice('danger', text);
+                showNotice('danger', text, tab);
             }
         } catch (e) {
-            if (e && e.name === 'AbortError') showNotice('warning', 'Dibatalkan.');
-            else showNotice('danger', 'Server tidak dapat dihubungi.');
+            if (e && e.name === 'AbortError') showNotice('warning', 'Dibatalkan.', tab);
+            else showNotice('danger', 'Server tidak dapat dihubungi.', tab);
         } finally {
-            controller = null;
-            $('pg-run').disabled = false;
-            $('pg-cancel').classList.add('d-none');
+            tab.controller = null;
+            renderTabs();
+            syncRun();
         }
     }
     $('pg-run').addEventListener('click', run);
-    $('pg-cancel').addEventListener('click', () => { if (controller) controller.abort(); });
+    $('pg-cancel').addEventListener('click', () => { if (active && active.controller) active.controller.abort(); });
 
-    function showNotice(kind, text) {
-        $('pg-results').replaceChildren(el('div', { class: 'alert alert-' + kind + ' mb-0', role: 'alert', text: text }));
+    /** A message in a tab's results box (the active tab unless told otherwise). */
+    function showNotice(kind, text, tab) {
+        (tab || active).results.replaceChildren(el('div', { class: 'alert alert-' + kind + ' mb-0', role: 'alert', text: text }));
     }
 
     const number = (n) => Number(n).toLocaleString('id-ID');
 
-    function renderRun(data, lineOffset) {
+    function renderRun(data, lineOffset, tab) {
         const parts = [];
         const rows = data.resultSets.reduce((sum, s) => sum + s.rows.length, 0);
         const summary = [
@@ -224,7 +333,7 @@
         ].join(' · ');
         parts.push(el('div', { class: 'small mb-2 ' + (data.success ? 'text-muted' : 'text-danger fw-semibold'), text: summary }));
 
-        if (data.error) parts.push(renderError(data.error, lineOffset));
+        if (data.error) parts.push(renderError(data.error, lineOffset, tab));
 
         const tabs = el('ul', { class: 'nav nav-pills pg-result-tabs mb-2', role: 'tablist' });
         const panes = el('div', { class: 'tab-content' });
@@ -235,7 +344,7 @@
             items.push({ label: 'Pesan (' + data.messages.length + ')', node: renderMessages(data.messages), title: '' });
         }
         items.forEach((item, i) => {
-            const id = 'pg-res-' + i;
+            const id = 'pg-res-' + tab.id + '-' + i;
             const link = el('button', {
                 class: 'nav-link py-1 px-2' + (i === 0 ? ' active' : ''), type: 'button', role: 'tab', title: item.title,
                 'data-bs-toggle': 'pill', 'data-bs-target': '#' + id, 'aria-controls': id, 'aria-selected': i === 0 ? 'true' : 'false', text: item.label,
@@ -244,10 +353,10 @@
             panes.appendChild(el('div', { class: 'tab-pane fade' + (i === 0 ? ' show active' : ''), id: id, role: 'tabpanel' }, [item.node]));
         });
         parts.push(tabs, panes);
-        $('pg-results').replaceChildren(...parts);
+        tab.results.replaceChildren(...parts);
     }
 
-    function renderError(error, lineOffset) {
+    function renderError(error, lineOffset, tab) {
         const box = el('div', { class: 'alert alert-danger mb-2', role: 'alert' }, [
             el('div', { class: 'fw-semibold', text: error.message }),
         ]);
@@ -255,9 +364,9 @@
         if (error.line) {
             const row = error.line + lineOffset;
             const link = el('a', { href: '#', text: 'baris ' + row });
-            link.addEventListener('click', (ev) => { ev.preventDefault(); editor.gotoLine(row, 0, true); editor.focus(); });
+            link.addEventListener('click', (ev) => { ev.preventDefault(); activate(tab); editor.gotoLine(row, 0, true); editor.focus(); });
             where.push(el('span', {}, ['Di ', link]));
-            editor.session.setAnnotations([{ row: row - 1, column: 0, text: error.message, type: 'error' }]);
+            tab.session.setAnnotations([{ row: row - 1, column: 0, text: error.message, type: 'error' }]);
         }
         if (error.procedure) where.push(el('span', { text: 'Di prosedur ' + error.procedure + (error.procedureLine ? ', baris ' + error.procedureLine : '') }));
         where.push(el('span', { text: 'Batch ' + error.batch + ' · galat ' + error.number + ' (tingkat ' + error.severity + ')' }));
@@ -369,7 +478,7 @@
         open.addEventListener('click', () => selectObject(o));
         const actions = el('span', { class: 'pg-actions' });
         if (o.kind === 'TABLE' || o.kind === 'VIEW') {
-            const play = el('button', { type: 'button', class: 'pg-act', title: 'SELECT 100 teratas dan jalankan', 'aria-label': 'SELECT 100 teratas ' + key }, [icon('bi-play-fill')]);
+            const play = el('button', { type: 'button', class: 'pg-act', title: 'SELECT TOP (1) * di tab baru', 'aria-label': 'SELECT TOP 1 ' + key }, [icon('bi-play-fill')]);
             play.addEventListener('click', () => scriptInto(o, 'select', true));
             actions.appendChild(play);
         } else if (o.kind === 'PROCEDURE') {
@@ -377,7 +486,10 @@
             exec.addEventListener('click', () => scriptInto(o, 'exec', false));
             actions.appendChild(exec);
         }
-        return el('div', { class: 'pg-item', 'data-key': key, 'data-name': o.name.toLowerCase(), role: 'treeitem' }, [open, actions]);
+        return el('div', {
+            class: 'pg-item', 'data-key': key, 'data-name': o.name.toLowerCase(), 'data-schema': o.schema, 'data-obj': o.name, 'data-kind': o.kind,
+            role: 'treeitem',
+        }, [open, actions]);
     }
 
     function highlight() {
@@ -403,8 +515,9 @@
     async function scriptInto(o, kind, thenRun) {
         const res = await api('POST', '/Script', { kind: kind, schema: o.schema, name: o.name });
         if (!res.ok) { showNotice('danger', failureText(res)); $('pg-tab-query').click(); return; }
-        putScript(res.data.sql);
-        if (thenRun) run();
+        // each script gets its own tab, named after the object (the verb first unless it is a plain look at the data)
+        const plain = kind === 'select' || kind === 'selectTop' || kind === 'exec';
+        openScript((plain ? '' : kind.toUpperCase() + ' ') + o.name, res.data.sql, thenRun);
     }
 
     // ---- structure -----------------------------------------------------------------------------
@@ -421,17 +534,62 @@
     }
 
     const scriptMenus = {
-        TABLE: [['select', 'SELECT 100 teratas'], ['insert', 'INSERT'], ['update', 'UPDATE'], ['delete', 'DELETE'], ['create', 'CREATE TABLE'], ['addColumn', 'Tambah kolom'], ['drop', 'DROP TABLE']],
-        VIEW: [['select', 'SELECT 100 teratas'], ['definition', 'Definisi'], ['alter', 'Ubah (CREATE OR ALTER)'], ['drop', 'DROP VIEW']],
+        TABLE: [['select', 'SELECT TOP 1 *'], ['selectTop', 'SELECT 100 teratas'], ['insert', 'INSERT'], ['update', 'UPDATE'], ['delete', 'DELETE'], ['create', 'CREATE TABLE'], ['addColumn', 'Tambah kolom'], ['drop', 'DROP TABLE']],
+        VIEW: [['select', 'SELECT TOP 1 *'], ['selectTop', 'SELECT 100 teratas'], ['definition', 'Definisi'], ['alter', 'Ubah (CREATE OR ALTER)'], ['drop', 'DROP VIEW']],
         PROCEDURE: [['exec', 'EXEC'], ['definition', 'Definisi'], ['alter', 'Ubah (CREATE OR ALTER)'], ['drop', 'DROP PROCEDURE']],
         FUNCTION: [['definition', 'Definisi'], ['alter', 'Ubah (CREATE OR ALTER)'], ['drop', 'DROP FUNCTION']],
     };
+
+
+    // ---- right-click menu on the tree ----------------------------------------------------------------
+    const menu = el('ul', { class: 'dropdown-menu pg-ctx', role: 'menu' });
+    document.body.appendChild(menu);
+    const closeMenu = () => menu.classList.remove('show');
+    document.addEventListener('click', closeMenu);
+    document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeMenu(); });
+    window.addEventListener('resize', closeMenu);
+    window.addEventListener('blur', closeMenu);
+    $('pg-tree').addEventListener('scroll', closeMenu);
+
+    function openMenu(x, y, entries) {
+        menu.replaceChildren(...entries.map((e) => {
+            if (e === '-') return el('li', {}, [el('hr', { class: 'dropdown-divider' })]);
+            const button = el('button', { type: 'button', class: 'dropdown-item', role: 'menuitem' }, [e.icon ? icon(e.icon + ' me-2') : null, e.label]);
+            button.addEventListener('click', () => { closeMenu(); e.run(); });
+            return el('li', {}, [button]);
+        }));
+        menu.classList.add('show');
+        // keep the menu on screen
+        const box = menu.getBoundingClientRect();
+        menu.style.left = Math.max(4, Math.min(x, window.innerWidth - box.width - 4)) + 'px';
+        menu.style.top = Math.max(4, Math.min(y, window.innerHeight - box.height - 4)) + 'px';
+    }
+
+    $('pg-tree').addEventListener('contextmenu', (ev) => {
+        ev.preventDefault();
+        const item = ev.target.closest ? ev.target.closest('.pg-item') : null;
+        const entries = [{ label: 'Query baru', icon: 'bi-file-earmark-plus', run: () => newBlank() }];
+        if (item) {
+            const o = { schema: item.dataset.schema, name: item.dataset.obj, kind: item.dataset.kind };
+            entries.push({ label: 'Struktur', icon: 'bi-diagram-2', run: () => selectObject(o) }, '-');
+            (scriptMenus[o.kind] || []).forEach(([kind, label]) => {
+                entries.push({ label: label, icon: 'bi-code-slash', run: () => scriptInto(o, kind, kind === 'select' || kind === 'selectTop') });
+            });
+            entries.push('-', {
+                label: 'Salin nama', icon: 'bi-clipboard',
+                run: async () => { try { await navigator.clipboard.writeText(o.schema + '.' + o.name); } catch (e) { /* clipboard blocked */ } },
+            });
+        } else {
+            entries.push({ label: 'Muat ulang objek', icon: 'bi-arrow-clockwise', run: () => loadTree() });
+        }
+        openMenu(ev.clientX, ev.clientY, entries);
+    });
 
     function renderStructure(d) {
         const menu = el('ul', { class: 'dropdown-menu dropdown-menu-end' });
         (scriptMenus[d.kind] || []).forEach(([kind, label]) => {
             const item = el('button', { type: 'button', class: 'dropdown-item', text: label });
-            item.addEventListener('click', () => scriptInto(d, kind, kind === 'select'));
+            item.addEventListener('click', () => scriptInto(d, kind, kind === 'select' || kind === 'selectTop'));
             menu.appendChild(el('li', {}, [item]));
         });
         const header = el('div', { class: 'd-flex flex-wrap align-items-center gap-2 mb-3' }, [
@@ -620,10 +778,11 @@
         if (!res.ok) { error.textContent = failureText(res); error.classList.remove('d-none'); return; }
         error.classList.add('d-none');
         modal.hide();
-        putScript(res.data.sql);
-        if (!settings.write) showNotice('info', 'Skrip CREATE TABLE sudah ada di editor. Playground sedang hanya baca, jadi menjalankannya akan ditolak: nyalakan Rakit:Playground:AllowWrite untuk membuat tabel.');
+        openScript('CREATE TABLE ' + ($('pg-nt-name').value.trim() || 'baru'), res.data.sql, false);
+        if (!settings.write) showNotice('info', 'Skrip CREATE TABLE sudah ada di tab baru. Playground sedang hanya baca, jadi menjalankannya akan ditolak: nyalakan Rakit:Playground:AllowWrite untuk membuat tabel.');
     });
 
     // ---- start ---------------------------------------------------------------------------------
+    restoreTabs();
     loadTree();
 })();

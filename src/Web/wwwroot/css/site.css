@@ -1565,3 +1565,79 @@ a.rk-stat:hover {
     margin: 0;
   }
 }
+
+/* ---------- Playground: query tabs and the tree's right-click menu ---------- */
+.pg-qtabs {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-bottom: 0.6rem;
+  padding-bottom: 0.2rem;
+  overflow-x: auto;
+}
+
+.pg-qtab {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  max-width: 15rem;
+  font-size: 0.8rem;
+  background: var(--rk-surface-2);
+  border: 1px solid var(--rk-border);
+  border-radius: var(--rk-radius-sm);
+}
+
+.pg-qtab.active {
+  background: var(--rk-surface);
+  border-color: var(--rk-accent);
+  box-shadow: inset 0 -2px 0 var(--rk-accent);
+}
+
+.pg-qtab-label,
+.pg-qtab-close,
+.pg-qtab-add {
+  padding: 0.3rem 0.55rem;
+  color: inherit;
+  background: transparent;
+  border: 0;
+}
+
+.pg-qtab-label {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pg-qtab-close {
+  padding-left: 0.15rem;
+  font-size: 0.7rem;
+  opacity: 0.55;
+}
+
+.pg-qtab-close:hover {
+  color: var(--bs-danger);
+  opacity: 1;
+}
+
+.pg-qtab-add {
+  flex: 0 0 auto;
+  border-radius: var(--rk-radius-sm);
+}
+
+.pg-qtab-add:hover {
+  background: var(--rk-surface-2);
+}
+
+.pg-ctx {
+  position: fixed;
+  z-index: 1080;
+  display: none;
+  min-width: 14rem;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.pg-ctx.show {
+  display: block;
+}
