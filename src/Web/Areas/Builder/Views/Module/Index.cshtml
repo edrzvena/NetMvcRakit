@@ -5,7 +5,7 @@
 
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h3 mb-0">Module</h1>
-    <a class="btn btn-primary" asp-area="Builder" asp-controller="Module" asp-action="Create">+ Module baru</a>
+    <a class="btn btn-primary" asp-area="Builder" asp-controller="Module" asp-action="Create"><i class="bi bi-plus-lg"></i> Module baru</a>
 </div>
 
 @if (!string.IsNullOrEmpty(Model.Message))
@@ -23,16 +23,29 @@
 }
 else
 {
-    <table class="table table-sm table-hover align-middle">
+    <div class="d-flex flex-wrap align-items-center gap-3 mb-3">
+        <div class="input-group" style="max-width: 460px;">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input type="search" class="form-control" id="module-search" autocomplete="off"
+                   placeholder="Cari nama, grup, tipe, status, atau ID (boleh paste link halaman)" aria-label="Cari module" />
+        </div>
+        <span class="text-muted small" id="module-search-count">@Model.Items.Count module</span>
+    </div>
+
+    <table class="table table-sm table-hover align-middle" id="module-table">
         <thead>
-            <tr><th>Nama</th><th>Grup</th><th>Tipe</th><th>Status</th><th>Diubah</th><th></th></tr>
+            <tr><th>Nama</th><th>ID</th><th>Grup</th><th>Tipe</th><th>Status</th><th>Diubah</th><th></th></tr>
         </thead>
         <tbody>
             @foreach (var m in Model.Items)
             {
                 var published = m.Status == ModuleStatus.Published;
-                <tr>
+                <tr data-id="@m.Id">
                     <td>@m.Name</td>
+                    <td class="text-nowrap">
+                        <code title="@m.Id">@m.Id.ToString()[..8]</code>
+                        <button type="button" class="btn btn-sm btn-link p-0 ms-1 text-muted" data-copy="@m.Id" data-bs-toggle="tooltip" title="Salin ID" aria-label="Salin ID @m.Name"><i class="bi bi-clipboard"></i></button>
+                    </td>
                     <td>@(m.GroupName ?? "-")</td>
                     <td>@ModuleDisplayText.TypeLabel(m.Type)</td>
                     <td>
@@ -40,31 +53,37 @@ else
                     </td>
                     <td>@(m.Updated?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "-")</td>
                     <td class="text-end text-nowrap">
-                        <a class="btn btn-sm btn-outline-primary" asp-area="Builder" asp-controller="Module" asp-action="Edit" asp-route-id="@m.Id">Ubah</a>
+                        <a class="btn btn-sm btn-outline-primary" data-bs-toggle="tooltip" title="Konfigurasi" aria-label="Konfigurasi @m.Name" asp-area="Builder" asp-controller="Module" asp-action="Edit" asp-route-id="@m.Id"><i class="bi bi-gear"></i></a>
                         @if (published)
                         {
-                            <a class="btn btn-sm btn-outline-info" target="_blank" rel="noopener" asp-area="Object" asp-controller="Page" asp-action="Index" asp-route-moduleId="@m.Id">Buka</a>
+                            <a class="btn btn-sm btn-outline-info" target="_blank" rel="noopener" data-bs-toggle="tooltip" title="Buka halaman" aria-label="Buka halaman @m.Name" asp-area="Object" asp-controller="Page" asp-action="Index" asp-route-moduleId="@m.Id"><i class="bi bi-box-arrow-up-right"></i></a>
                             <form class="d-inline" method="post" asp-area="Builder" asp-controller="Module" asp-action="Unpublish" asp-route-id="@m.Id">
-                                <button type="submit" class="btn btn-sm btn-outline-warning">Unpublish</button>
+                                <button type="submit" class="btn btn-sm btn-outline-warning" data-bs-toggle="tooltip" title="Unpublish" aria-label="Unpublish @m.Name"><i class="bi bi-cloud-slash"></i></button>
                             </form>
                         }
                         else
                         {
                             <form class="d-inline" method="post" asp-area="Builder" asp-controller="Module" asp-action="Publish" asp-route-id="@m.Id">
-                                <button type="submit" class="btn btn-sm btn-outline-success">Publish</button>
+                                <button type="submit" class="btn btn-sm btn-outline-success" data-bs-toggle="tooltip" title="Publish" aria-label="Publish @m.Name"><i class="bi bi-cloud-upload"></i></button>
                             </form>
                         }
                         <form class="d-inline" method="post" asp-area="Builder" asp-controller="Module" asp-action="Copy" asp-route-id="@m.Id">
-                            <button type="submit" class="btn btn-sm btn-outline-secondary">Salin</button>
+                            <button type="submit" class="btn btn-sm btn-outline-secondary" data-bs-toggle="tooltip" title="Salin module" aria-label="Salin module @m.Name"><i class="bi bi-copy"></i></button>
                         </form>
                         @* the name is free text: it travels in an encoded attribute, never inside a JavaScript string *@
                         <form class="d-inline" method="post" asp-area="Builder" asp-controller="Module" asp-action="Delete" asp-route-id="@m.Id"
                               data-confirm="Hapus module @m.Name?" onsubmit="return confirm(this.dataset.confirm);">
-                            <button type="submit" class="btn btn-sm btn-outline-danger">Hapus</button>
+                            <button type="submit" class="btn btn-sm btn-outline-danger" data-bs-toggle="tooltip" title="Hapus" aria-label="Hapus @m.Name"><i class="bi bi-trash"></i></button>
                         </form>
                     </td>
                 </tr>
             }
         </tbody>
     </table>
+    <p class="text-muted d-none" id="module-search-empty">Tidak ada module yang cocok.</p>
+}
+
+@section Scripts {
+    <script src="~/js/copy-id.js" asp-append-version="true"></script>
+    <script src="~/js/module-list.js" asp-append-version="true"></script>
 }

@@ -36,6 +36,20 @@
 
 <div asp-validation-summary="All" class="alert alert-danger"></div>
 
+@if (Model.IsEdit && Model.Id is { } moduleId)
+{
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3 small">
+        <span class="text-muted">ID module</span>
+        <code class="user-select-all">@moduleId</code>
+        <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" data-copy="@moduleId" data-bs-toggle="tooltip" title="Salin ID" aria-label="Salin ID module"><i class="bi bi-clipboard"></i></button>
+        @if (Model.Status == ModuleStatus.Published)
+        {
+            <a class="btn btn-sm btn-outline-info py-0 px-1" target="_blank" rel="noopener" data-bs-toggle="tooltip" title="Buka halaman" aria-label="Buka halaman" asp-area="Object" asp-controller="Page" asp-action="Index" asp-route-moduleId="@moduleId"><i class="bi bi-box-arrow-up-right"></i></a>
+        }
+        <span class="text-muted">| dipakai di <code>{{module:@moduleId}}</code> pada module Page</span>
+    </div>
+}
+
 @if (Model.IsEdit && Model.Status == ModuleStatus.Published)
 {
     <div class="alert alert-info" role="note">
@@ -500,5 +514,6 @@
 @section Scripts {
     <script src="~/lib/chart.js/chart.umd.min.js"></script>
     <script src="~/js/chart-render.js" asp-append-version="true"></script>
+    <script src="~/js/copy-id.js" asp-append-version="true"></script>
     <script src="~/js/module-form.js" asp-append-version="true"></script>
 }
