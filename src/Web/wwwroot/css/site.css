@@ -1454,7 +1454,8 @@ a.rk-stat:hover {
   border-radius: var(--rk-radius-sm);
 }
 
-#pg-editor {
+#pg-editor,
+#code-editor {
   width: 100%;
   height: 100%;
 }

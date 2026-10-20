@@ -47,6 +47,38 @@
             <a class="btn btn-sm btn-outline-info py-0 px-1" target="_blank" rel="noopener" data-bs-toggle="tooltip" title="Buka halaman" aria-label="Buka halaman" asp-area="Object" asp-controller="Page" asp-action="Index" asp-route-moduleId="@moduleId"><i class="bi bi-box-arrow-up-right"></i></a>
         }
         <span class="text-muted">| dipakai di <code>{{module:@moduleId}}</code> pada module Page</span>
+
+        @if (Model.OtherModules.Count > 0)
+        {
+            var sameGroup = Model.OtherModules.Where(m => m.GroupId is not null && m.GroupId == Model.GroupId).ToList();
+            var otherGroups = Model.OtherModules.Except(sameGroup)
+                .OrderBy(m => m.GroupName ?? "~").ThenBy(m => m.Name).GroupBy(m => m.GroupName ?? "Tanpa grup").ToList();
+            <div class="dropdown ms-auto" id="module-jump">
+                <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"><i class="bi bi-arrow-left-right"></i> Pindah ke module</button>
+                <div class="dropdown-menu dropdown-menu-end p-2" style="width: 22rem">
+                    <input type="search" class="form-control form-control-sm mb-2" id="module-jump-search" placeholder="Cari nama, tipe, atau grup" autocomplete="off" aria-label="Cari module" />
+                    <div style="max-height: 18rem; overflow: auto" id="module-jump-list">
+                        @if (sameGroup.Count > 0)
+                        {
+                            <div class="px-2 small text-muted text-uppercase" data-jump-heading>Satu grup</div>
+                            @foreach (var m in sameGroup.OrderBy(m => m.Name))
+                            {
+                                <a class="dropdown-item small" data-jump-item data-text="@($"{m.Name} {ModuleDisplayText.TypeLabel(m.Type)} {m.GroupName}".ToLowerInvariant())" asp-area="Builder" asp-controller="Module" asp-action="Edit" asp-route-id="@m.Id">@m.Name <span class="text-muted">&middot; @ModuleDisplayText.TypeLabel(m.Type)</span></a>
+                            }
+                        }
+                        @foreach (var group in otherGroups)
+                        {
+                            <div class="px-2 pt-1 small text-muted text-uppercase" data-jump-heading>@group.Key</div>
+                            @foreach (var m in group)
+                            {
+                                <a class="dropdown-item small" data-jump-item data-text="@($"{m.Name} {ModuleDisplayText.TypeLabel(m.Type)} {m.GroupName}".ToLowerInvariant())" asp-area="Builder" asp-controller="Module" asp-action="Edit" asp-route-id="@m.Id">@m.Name <span class="text-muted">&middot; @ModuleDisplayText.TypeLabel(m.Type)</span></a>
+                            }
+                        }
+                        <div class="px-2 small text-muted d-none" id="module-jump-empty">Tidak ada module yang cocok.</div>
+                    </div>
+                </div>
+            </div>
+        }
     </div>
 }
 
@@ -85,6 +117,9 @@
         </li>
         <li class="nav-item" role="presentation" data-types="widget chart">
             <button class="nav-link" id="tab-visual-preview" data-bs-toggle="tab" data-bs-target="#pane-visual-preview" type="button" role="tab" aria-controls="pane-visual-preview" aria-selected="false">Preview</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-code" data-bs-toggle="tab" data-bs-target="#pane-code" type="button" role="tab" aria-controls="pane-code" aria-selected="false"><i class="bi bi-braces"></i> Kode</button>
         </li>
     </ul>
 
@@ -131,6 +166,20 @@
             <div class="mb-3">
                 <label class="form-label" for="Description">Deskripsi</label>
                 <textarea class="form-control" id="Description" name="Description" rows="2" maxlength="500">@Model.Description</textarea>
+            </div>
+
+            <div class="border rounded p-3 mb-3" data-types="table form" id="wizard-card">
+                <div class="d-flex flex-wrap align-items-center gap-3">
+                    <div class="flex-grow-1">
+                        <h2 class="h5 mb-1">Buat dari tabel</h2>
+                        <p class="small text-muted mb-0">
+                            Pilih tabel atau view dan kolomnya: data source List dan Detail, prosedur Tambah / Ubah / Hapus (di-whitelist otomatis),
+                            kolom Display, dan field Form diisi untuk Anda. Semuanya masih bisa diubah di tab masing-masing; module baru tersimpan saat Anda menyimpan.
+                        </p>
+                    </div>
+                    <button type="button" class="btn btn-primary" id="wizard-open"><i class="bi bi-magic"></i> Buat dari tabel...</button>
+                </div>
+                <div id="wizard-status" class="small mt-2" aria-live="polite"></div>
             </div>
 
             <div class="border rounded p-3 mb-3" data-types="table widget chart">
@@ -477,6 +526,25 @@
             </div>
         </div>
 
+        @* ---------------- Kode ---------------- *@
+        <div class="tab-pane fade" id="pane-code" role="tabpanel" aria-labelledby="tab-code">
+            <div class="border rounded p-3 mb-3">
+                <h2 class="h5">Kode (JSON)</h2>
+                <p class="small text-muted mb-2">
+                    Seluruh pengaturan module di tab lain dalam satu JSON, termasuk data source yang dipilih (<code>source</code>). Ubah di sini lalu klik
+                    <strong>Terapkan</strong> untuk memuat ulang semua tab; JSON yang tidak valid tidak mengubah apa pun. Isi tab ini dimuat ulang tiap kali dibuka,
+                    dan baru tersimpan saat module disimpan (dengan validasi yang sama seperti biasa).
+                </p>
+                <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                    <button type="button" class="btn btn-sm btn-primary" id="code-apply"><i class="bi bi-check2"></i> Terapkan</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="code-reload"><i class="bi bi-arrow-clockwise"></i> Muat ulang dari formulir</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="code-copy"><i class="bi bi-clipboard"></i> Salin</button>
+                    <span id="code-status" class="small text-muted" aria-live="polite"></span>
+                </div>
+                <div class="pg-editor-wrap" style="height: 420px"><div id="code-editor" aria-label="Editor JSON config module"></div></div>
+            </div>
+        </div>
+
         @* ---------------- Preview ---------------- *@
         <div class="tab-pane fade" id="pane-preview" role="tabpanel" aria-labelledby="tab-preview">
             <div class="border rounded p-3 mb-3">
@@ -511,9 +579,83 @@
     </span>
 </form>
 
+@* ---------------- "Buat dari tabel" wizard (outside the form: Enter in it must not submit the module) ---------------- *@
+<div class="modal fade" id="wizard-modal" tabindex="-1" aria-labelledby="wizard-title" aria-hidden="true" data-can-procedures="@(Model.CanCreateProcedures ? "1" : "0")">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div>
+                    <h2 class="modal-title h5" id="wizard-title">Buat dari tabel</h2>
+                    <div class="small text-muted" id="wizard-steps">Langkah 1 dari 3: tabel</div>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Tutup"></button>
+            </div>
+            <div class="modal-body">
+                <div id="wizard-error" class="alert alert-danger d-none" role="alert"></div>
+
+                <div id="wizard-step-1">
+                    <label class="form-label" for="wizard-filter">Tabel atau view</label>
+                    <input type="search" class="form-control mb-2" id="wizard-filter" placeholder="Cari tabel" autocomplete="off" />
+                    <select class="form-select" id="wizard-table" size="9" aria-label="Daftar tabel dan view"></select>
+                    <div class="form-text">Hanya tabel dan view di schema yang diizinkan (<code>Rakit:Db:AllowedSchemas</code>).</div>
+                </div>
+
+                <div id="wizard-step-2" class="d-none">
+                    <div id="wizard-table-notes"></div>
+                    <div class="d-flex flex-wrap align-items-end gap-3 mb-2">
+                        <div>
+                            <label class="form-label mb-0" for="wizard-key">Kolom kunci</label>
+                            <select class="form-select form-select-sm" id="wizard-key" style="min-width: 14rem"></select>
+                        </div>
+                        <div class="ms-auto d-flex gap-2">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="wizard-all">Pilih semua</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="wizard-none">Kosongkan</button>
+                        </div>
+                    </div>
+                    <div class="table-responsive" style="max-height: 24rem; overflow: auto">
+                        <table class="table table-sm align-middle mb-0" id="wizard-columns">
+                            <thead><tr><th style="width: 2.5rem"></th><th>Kolom</th><th>Tipe</th><th>Ciri</th><th>Keterangan</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="form-text">Kolom yang dicentang tampil di list dan masuk ke data source. Kolom kunci selalu ikut.</div>
+                </div>
+
+                <div id="wizard-step-3" class="d-none">
+                    <p class="mb-2">Aksi yang dibuat untuk module ini:</p>
+                    <div class="form-check"><input class="form-check-input" type="checkbox" id="wizard-insert" /><label class="form-check-label" for="wizard-insert">Tambah (Insert)</label></div>
+                    <div class="form-check" data-wizard-key-only><input class="form-check-input" type="checkbox" id="wizard-update" /><label class="form-check-label" for="wizard-update">Ubah (Update)</label></div>
+                    <div class="form-check" data-wizard-key-only><input class="form-check-input" type="checkbox" id="wizard-delete" /><label class="form-check-label" for="wizard-delete">Hapus (Delete)</label></div>
+                    <div class="alert alert-warning small mt-3 d-none" id="wizard-no-procedures" role="note">
+                        Membuat prosedur butuh <code>Rakit:Playground:Enabled = true</code> dan <code>Rakit:Playground:AllowWrite = true</code> (khusus pengembangan),
+                        jadi Tambah, Ubah, dan Hapus dimatikan. List dan Detail tetap dibuat.
+                    </div>
+                    <div class="small text-muted mt-3" id="wizard-summary"></div>
+                    <div class="small text-muted mt-2">
+                        Aksi tulis dibuat sebagai prosedur <code>Sp&lt;Tabel&gt;_Insert/Update/Delete</code> di schema tabel (ditandai <code>rakit:generated</code>, otomatis masuk SP Whitelist);
+                        prosedur milik Anda dengan nama yang sama tidak ditimpa. Menjalankan tombol tulis di halaman tetap butuh <code>Rakit:Db:AllowWrite</code>.
+                    </div>
+                </div>
+
+                <div id="wizard-done" class="d-none"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary me-auto" data-bs-dismiss="modal" id="wizard-cancel">Batal</button>
+                <button type="button" class="btn btn-outline-secondary" id="wizard-back">Kembali</button>
+                <button type="button" class="btn btn-primary" id="wizard-next">Lanjut</button>
+                <button type="button" class="btn btn-success d-none" id="wizard-apply"><i class="bi bi-check2"></i> Terapkan</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 @section Scripts {
     <script src="~/lib/chart.js/chart.umd.min.js"></script>
     <script src="~/js/chart-render.js" asp-append-version="true"></script>
+    <script src="~/lib/ace/ace.js"></script>
     <script src="~/js/copy-id.js" asp-append-version="true"></script>
     <script src="~/js/module-form.js" asp-append-version="true"></script>
+    <script src="~/js/module-wizard.js" asp-append-version="true"></script>
+    <script src="~/js/module-code.js" asp-append-version="true"></script>
 }
+

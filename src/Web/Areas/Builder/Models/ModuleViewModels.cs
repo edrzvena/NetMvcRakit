@@ -35,6 +35,12 @@ public sealed class ModuleFormViewModel
     /// <summary>Every module but a Page (Table, Form, Chart, Widget) a Page may embed, for the "Sisipkan module" helper.</summary>
     public IReadOnlyList<ModuleSummary> EmbeddableModules { get; set; } = [];
 
+    /// <summary>Every other module, for the "Pindah ke module" jump list in the header (edit screen).</summary>
+    public IReadOnlyList<ModuleSummary> OtherModules { get; set; } = [];
+
+    /// <summary>The wizard can create CRUD procedures (Rakit:Playground:Enabled and AllowWrite).</summary>
+    public bool CanCreateProcedures { get; set; }
+
     /// <summary>Optional record actions: Detail is a Query data source, the other three are Command data sources.</summary>
     public Guid? DetailDataSourceId { get; set; }
     public Guid? InsertDataSourceId { get; set; }

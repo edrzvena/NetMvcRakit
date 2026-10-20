@@ -359,15 +359,18 @@
 
     // ---- Widget tab ----
     const widgetInput = (name) => $('widget-' + name);
-    widgetInput('valueField').value = widget.valueField || '';
-    widgetInput('label').value = widget.label || '';
-    widgetInput('labelField').value = widget.labelField || '';
-    widgetInput('format').value = widget.format || 'number';
-    widgetInput('decimals').value = widget.decimals || 0;
-    widgetInput('prefix').value = widget.prefix || '';
-    widgetInput('suffix').value = widget.suffix || '';
-    widgetInput('color').value = widget.color || 'primary';
-    widgetInput('refreshSeconds').value = widget.refreshSeconds || 0;
+    function loadWidgetInputs(w) {
+        widgetInput('valueField').value = w.valueField || '';
+        widgetInput('label').value = w.label || '';
+        widgetInput('labelField').value = w.labelField || '';
+        widgetInput('format').value = w.format || 'number';
+        widgetInput('decimals').value = w.decimals || 0;
+        widgetInput('prefix').value = w.prefix || '';
+        widgetInput('suffix').value = w.suffix || '';
+        widgetInput('color').value = w.color || 'primary';
+        widgetInput('refreshSeconds').value = w.refreshSeconds || 0;
+    }
+    loadWidgetInputs(widget);
 
     // A column name that the loaded data source does not return would only show an empty card, so say so (like the Display tab).
     function refreshWidgetWarnings() {
@@ -480,13 +483,16 @@
     const isRound = () => chartInput('kind').value === 'pie' || chartInput('kind').value === 'doughnut';
     const MAX_SERIES = 8;
     const PALETTE = (window.RakitVisual && window.RakitVisual.palette) || [];
-    chartInput('kind').value = chart.kind || 'bar';
-    chartInput('labelField').value = chart.labelField || '';
-    chartInput('title').value = chart.title || '';
-    chartInput('maxRows').value = chart.maxRows || 100;
-    chartInput('stacked').checked = !!chart.stacked;
-    chartInput('horizontal').checked = !!chart.horizontal;
-    chartInput('legend').checked = chart.legend !== false;
+    function loadChartInputs(c) {
+        chartInput('kind').value = c.kind || 'bar';
+        chartInput('labelField').value = c.labelField || '';
+        chartInput('title').value = c.title || '';
+        chartInput('maxRows').value = c.maxRows || 100;
+        chartInput('stacked').checked = !!c.stacked;
+        chartInput('horizontal').checked = !!c.horizontal;
+        chartInput('legend').checked = c.legend !== false;
+    }
+    loadChartInputs(chart);
 
     function refreshChartWarnings() {
         const missing = (value) => known !== null && value && !known.has(value.trim().toLowerCase());
@@ -649,7 +655,100 @@
         if (keyField) display.keyField = keyField;
         return { display: display, form: { fields: formFields }, actions: collectActions(), access: config.access || { view: ['*'] } };
     }
-    form.addEventListener('submit', () => { configInput.value = JSON.stringify(collectConfig()); });
+    form.addEventListener('submit', () => { dirty = false; configInput.value = JSON.stringify(collectConfig()); });
+
+    // ---- whole config as JSON (the Kode tab) and the other way round; also used by the "Buat dari tabel" wizard ----
+    // The five data source selects, by their key in the stored config's `source`.
+    const SOURCE_SELECTS = { list: 'DataSourceId', detail: 'DetailDataSourceId', insert: 'InsertDataSourceId', update: 'UpdateDataSourceId', delete: 'DeleteDataSourceId' };
+    let dirty = false; // anything typed or applied since the page opened (asked before jumping to another module)
+    form.addEventListener('input', () => { dirty = true; });
+    form.addEventListener('change', () => { dirty = true; });
+
+    function collectSource() {
+        const type = currentType();
+        const keys = type === 'form' ? ['insert'] : type === 'page' ? [] : (type === 'widget' || type === 'chart') ? ['list']
+            : ['list', 'detail', 'insert', 'update', 'delete'];
+        const out = {};
+        keys.forEach((k) => { const id = $(SOURCE_SELECTS[k]).value; if (id) out[k] = { dataSourceId: id }; });
+        return out;
+    }
+
+    function collectFullConfig() {
+        const access = config.access || { view: ['*'] };
+        if (currentType() === 'page') return { source: {}, page: { html: pageHtml ? pageHtml.value : '' }, access: access };
+        return Object.assign({ source: collectSource() }, collectConfig());
+    }
+
+    /**
+     * Loads a (possibly partial) config into the form. A `source` is checked first: a data source id that is not in the
+     * selects stops everything, so nothing is half applied. Returns { ok, errors }.
+     */
+    function applyConfig(next) {
+        const errors = [];
+        if (next.source && typeof next.source === 'object') {
+            Object.keys(next.source).forEach((k) => {
+                const id = next.source[k] && next.source[k].dataSourceId;
+                if (!SOURCE_SELECTS[k]) errors.push('source.' + k + ': bagian ini tidak dikenal.');
+                else if (id && !Array.from($(SOURCE_SELECTS[k]).options).some((o) => o.value.toLowerCase() === String(id).toLowerCase()))
+                    errors.push('source.' + k + ': data source ' + id + ' tidak ada di daftar pilihan.');
+            });
+        }
+        if (errors.length > 0) return { ok: false, errors: errors };
+
+        if (next.source && typeof next.source === 'object') {
+            Object.keys(SOURCE_SELECTS).forEach((k) => {
+                const select = $(SOURCE_SELECTS[k]);
+                const id = next.source[k] && next.source[k].dataSourceId;
+                const option = id ? Array.from(select.options).find((o) => o.value.toLowerCase() === String(id).toLowerCase()) : null;
+                select.value = option ? option.value : '';
+            });
+            known = null;
+            $('widget-columns').replaceChildren();
+            $('chart-columns').replaceChildren();
+        }
+        if (next.display && typeof next.display === 'object') {
+            if (next.display.take !== undefined) $('take').value = next.display.take;
+            if (next.display.maxTake !== undefined) $('maxTake').value = next.display.maxTake;
+            if (next.display.keyField !== undefined) $('keyField').value = next.display.keyField || '';
+            if (Array.isArray(next.display.columns))
+                columns.splice(0, columns.length, ...next.display.columns.map((c) => Object.assign({ visible: true }, c)));
+        }
+        if (next.form && Array.isArray(next.form.fields)) fields.splice(0, fields.length, ...next.form.fields);
+        if (Array.isArray(next.actions)) actionList.splice(0, actionList.length, ...next.actions);
+        if (next.widget && typeof next.widget === 'object') loadWidgetInputs(next.widget);
+        if (next.chart && typeof next.chart === 'object') {
+            loadChartInputs(next.chart);
+            chartSeries.splice(0, chartSeries.length, ...(Array.isArray(next.chart.series) ? next.chart.series : []));
+        }
+        if (next.access && typeof next.access === 'object') config.access = next.access;
+        if (next.page && typeof next.page.html === 'string' && pageHtml) { pageHtml.value = next.page.html; pageHtml.dispatchEvent(new Event('input')); }
+
+        renderColumns();
+        renderFields();
+        renderActions();
+        renderChartSeries();
+        refreshWidgetWarnings();
+        refreshChartWarnings();
+        dirty = true;
+        return { ok: true, errors: [] };
+    }
+
+    // A data source the wizard just made is not in the selects yet: add it (or update its text) and select it.
+    function addDataSourceOption(role, ds) {
+        const select = $(SOURCE_SELECTS[role]);
+        let option = Array.from(select.options).find((o) => o.value.toLowerCase() === ds.id.toLowerCase());
+        if (!option) { option = el('option', { value: ds.id }); select.appendChild(option); }
+        option.textContent = ds.code + ' - ' + ds.name + ' (' + ds.mode + ')';
+        select.value = ds.id;
+        if (role === 'list') select.dispatchEvent(new Event('change'));
+        dirty = true;
+    }
+
+    window.RakitModuleForm = {
+        el: el, postJson: postJson, errorBox: errorBox, currentType: currentType,
+        collectFullConfig: collectFullConfig, applyConfig: applyConfig, addDataSourceOption: addDataSourceOption,
+        isDirty: () => dirty,
+    };
 
     // ---- preview ----
     const state = { skip: 0, orderBy: null };

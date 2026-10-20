@@ -24,6 +24,8 @@ public class ModuleController(
     IModuleRuntimeService runtime,
     IModuleVisualService visual,
     IWorkflowRepository workflows,
+    ITableModuleGenerator tableGenerator,
+    ISchemaBrowserService schemaBrowser,
     IOptions<RakitDbOptions> dbOptions,
     ILogger<ModuleController> logger) : Controller
 {
@@ -308,6 +310,41 @@ public class ModuleController(
         return Json(new { html, changed = ModulePageHtml.Sanitize(raw).Trim() != raw.Trim() });
     });
 
+    // ---- "Buat dari tabel" wizard (builder screen: reasons are shown in full) -----------------------
+
+    /// <summary>Tables and views the wizard can start from (allowed schemas only).</summary>
+    [HttpGet]
+    public Task<IActionResult> WizardTables(CancellationToken ct) => BuilderJsonAsync(async () =>
+    {
+        var tables = await schemaBrowser.GetTablesAsync(ct);
+        return Json(new { tables = tables.Select(t => new { schema = t.Schema, name = t.Name, kind = t.Kind }) });
+    });
+
+    [HttpGet]
+    public Task<IActionResult> WizardInspect(string? schema, string? name, CancellationToken ct) => BuilderJsonAsync(async () =>
+        Json(await tableGenerator.InspectAsync(schema ?? "", name ?? "", ct)));
+
+    /// <summary>
+    /// Makes the data sources (and CRUD procedures) for a table and answers with them plus the Display / Form settings to
+    /// load into the form. Nothing about the module itself is saved: the builder saves the module as usual.
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    public Task<IActionResult> WizardApply([FromBody] TableModuleRequest? request, CancellationToken ct) => BuilderJsonAsync(async () =>
+    {
+        if (request is null) return JsonError(400, "Permintaan tidak valid.");
+        var result = await tableGenerator.ApplyAsync(request, CurrentUser, ct);
+        return Json(new
+        {
+            dataSources = result.DataSources.Select(d => new
+            {
+                id = d.Id, code = d.Code, name = d.Name, role = d.Role, mode = ModuleDisplayText.ModeLabel(d.Mode), created = d.Created,
+            }),
+            // same JSON as ConfigJson (camelCase names, enums as text)
+            config = JsonDocument.Parse(ModuleJson.Serialize(result.Config)).RootElement,
+            notes = result.Notes,
+        });
+    });
+
     // ---- internals -----------------------------------------------------------------------------
 
     /// <summary>Turns "id=2&amp;q=abc" into the query-string part of a parameter context.</summary>
@@ -543,7 +580,10 @@ public class ModuleController(
             .ToList();
         model.WriteEnabled = dbOptions.Value.AllowWrite;
         model.Workflows = await workflows.ListAsync(ct);
-        model.EmbeddableModules = (await modules.ListAsync(ct: ct)).Where(m => m.Type != ModuleType.Page).ToList();
+        var allModules = await modules.ListAsync(ct: ct);
+        model.EmbeddableModules = allModules.Where(m => m.Type != ModuleType.Page).ToList();
+        model.OtherModules = allModules.Where(m => m.Id != model.Id).ToList();
+        model.CanCreateProcedures = tableGenerator.CanCreateProcedures;
 
         if (model.IsEdit && model.Id is { } moduleId)
             model.Status = (await modules.GetAsync(moduleId, ct))?.Status ?? model.Status;
@@ -566,6 +606,15 @@ public class ModuleController(
         catch (ModuleValidationException ex)
         {
             return JsonError(400, "Module belum valid.", errors: ex.Errors);
+        }
+        catch (TableModuleException ex)
+        {
+            return JsonError(ex.Kind switch
+            {
+                TableModuleErrorKind.Invalid => 400,
+                TableModuleErrorKind.NeedsPlayground => 409,
+                _ => 422,
+            }, ex.Message);
         }
         catch (DataSourceNotFoundException)
         {

@@ -42,6 +42,7 @@ public static class DependencyInjection
         services.AddSingleton<IDbConnectionFactory, DbConnectionFactory>();
         services.AddSingleton<IDbHealthService, DbHealthService>();
         services.AddSingleton<ISchemaBrowserService, SchemaBrowserService>();
+        services.AddSingleton<IObjectCatalog, ObjectCatalog>();
         services.AddSingleton<IPlaygroundService, PlaygroundService>();
         services.AddSingleton<ISpWhitelistService, SpWhitelistService>();
         services.AddSingleton<IDataSourceRepository, DataSourceRepository>();
@@ -56,6 +57,7 @@ public static class DependencyInjection
         services.AddSingleton<IModuleRuntimeService, ModuleRuntimeService>();
         services.AddSingleton<IModuleRecordService, ModuleRecordService>();
         services.AddSingleton<IModuleLookupService, ModuleLookupService>();
+        services.AddSingleton<ITableModuleGenerator, TableModuleGenerator>();
         services.AddSingleton<IModuleVisualService, ModuleVisualService>();
         services.Configure<WorkflowOptions>(configuration.GetSection(WorkflowOptions.SectionName));
         services.Configure<MailOptions>(configuration.GetSection(MailOptions.SectionName));
