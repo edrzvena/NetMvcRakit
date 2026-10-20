@@ -8,7 +8,7 @@ public static class TestDb
 
     public static string BaseConnectionString { get; } =
         Environment.GetEnvironmentVariable("RAKIT_TEST_CONN")
-        ?? @"Server=.\SQLEXPRESS01;Integrated Security=true;TrustServerCertificate=true";
+        ?? @"Server=.\SQLEXPRESS;Integrated Security=true;TrustServerCertificate=true";
 
     public static string MasterConnectionString => $"{BaseConnectionString};Database=master";
 

@@ -3,7 +3,7 @@
 ## Menjalankan (dev)
 
 ```
-dotnet run --project db/Rakit.Migrations      # buat/upgrade database Rakit di .\SQLEXPRESS01
+dotnet run --project db/Rakit.Migrations      # buat/upgrade database Rakit di .\SQLEXPRESS
 dotnet run --project src/Web                  # jalankan web (Development)
 ```
 

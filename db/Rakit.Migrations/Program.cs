@@ -1,11 +1,11 @@
-﻿using Rakit.Migrations;
+using Rakit.Migrations;
 
 // Usage: dotnet run --project db/Rakit.Migrations [connectionString]
 // Falls back to RAKIT_MIGRATE_CONN, then to the local dev database.
 var connectionString =
     args.FirstOrDefault()
     ?? Environment.GetEnvironmentVariable("RAKIT_MIGRATE_CONN")
-    ?? @"Server=.\SQLEXPRESS01;Database=Rakit;Integrated Security=true;TrustServerCertificate=true";
+    ?? @"Server=.\SQLEXPRESS;Database=Rakit;Integrated Security=true;TrustServerCertificate=true";
 
 var result = MigrationRunner.Run(connectionString, Console.WriteLine);
 

@@ -57,7 +57,7 @@ public class DbHealthServiceTests
         {
             Assert.False(c.IsHealthy);
             Assert.DoesNotContain("Server=", c.Error!, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("SQLEXPRESS01", c.Error!, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("SQLEXPRESS", c.Error!, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("Rakit_NoSuchDb", c.Error!, StringComparison.OrdinalIgnoreCase);
         }
     }
