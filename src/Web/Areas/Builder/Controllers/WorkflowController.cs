@@ -1,0 +1,271 @@
+using System.Text.Json;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
+using Rakit.Core.DataSources;
+using Rakit.Core.Workflows;
+using Rakit.Web.Areas.Builder.Models;
+
+namespace Rakit.Web.Areas.Builder.Controllers;
+
+[Area("Builder")]
+public class WorkflowController(
+    IWorkflowRepository workflows,
+    IWorkflowChecker checker,
+    IDataSourceRepository dataSources,
+    ILogger<WorkflowController> logger) : Controller
+{
+    private const string UnavailableView = "~/Areas/Builder/Views/Schema/Unavailable.cshtml";
+    private const int HistoryRows = 30;
+
+    private string CurrentUser => User.Identity?.Name ?? "anonymous";
+
+    // ---- list ----------------------------------------------------------------------------------
+
+    public Task<IActionResult> Index(CancellationToken ct) => GuardAsync(async () =>
+        View(new WorkflowIndexViewModel(await workflows.ListAsync(ct), TempData["Message"] as string, TempData["Error"] as string)));
+
+    // ---- publish / unpublish / copy / delete (each is a POST from the list) -----------------------
+
+    /// <summary>Makes the workflow runnable. Besides the structural check the repository does, every step's data source must exist and the outputs it reads must come from an earlier step.</summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    public Task<IActionResult> Publish(Guid id, CancellationToken ct) => GuardAsync(async () =>
+    {
+        var workflow = await workflows.GetAsync(id, ct);
+        if (workflow is null) return NotFound();
+
+        var problems = (await checker.CheckAsync(workflow.Steps, ct)).Where(i => i.IsError).Select(i => i.Message).ToList();
+        if (problems.Count > 0)
+        {
+            TempData["Error"] = $"Workflow '{workflow.Name}' belum bisa dipublikasikan: {string.Join(" ", problems)}";
+            return RedirectToAction(nameof(Index));
+        }
+
+        try
+        {
+            await workflows.SetStatusAsync(id, WorkflowStatus.Published, CurrentUser, ct);
+            TempData["Message"] = $"Workflow '{workflow.Name}' dipublikasikan: tombol aksi yang memakainya sekarang bisa menjalankannya.";
+        }
+        catch (WorkflowValidationException ex)
+        {
+            TempData["Error"] = $"Workflow '{workflow.Name}' belum bisa dipublikasikan: {string.Join(" ", ex.Errors)}";
+        }
+        return RedirectToAction(nameof(Index));
+    });
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public Task<IActionResult> Unpublish(Guid id, CancellationToken ct) => GuardAsync(async () =>
+    {
+        try
+        {
+            var workflow = await workflows.SetStatusAsync(id, WorkflowStatus.Draft, CurrentUser, ct);
+            TempData["Message"] = $"Workflow '{workflow.Name}' dikembalikan ke draft: tombol yang memakainya tidak bisa menjalankannya lagi.";
+        }
+        catch (WorkflowNotFoundException)
+        {
+            return NotFound();
+        }
+        return RedirectToAction(nameof(Index));
+    });
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public Task<IActionResult> Copy(Guid id, CancellationToken ct) => GuardAsync(async () =>
+    {
+        try
+        {
+            var copy = await workflows.CopyAsync(id, CurrentUser, ct);
+            TempData["Message"] = $"Disalin sebagai '{copy.Name}' (kode {copy.Code}, draft).";
+        }
+        catch (WorkflowNotFoundException)
+        {
+            return NotFound();
+        }
+        return RedirectToAction(nameof(Index));
+    });
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public Task<IActionResult> Delete(Guid id, CancellationToken ct) => GuardAsync(async () =>
+    {
+        var workflow = await workflows.GetAsync(id, ct);
+        if (workflow is null) return NotFound();
+
+        try
+        {
+            await workflows.DeleteAsync(id, CurrentUser, ct);
+            TempData["Message"] = $"Workflow '{workflow.Name}' dihapus.";
+        }
+        catch (WorkflowInUseException ex)
+        {
+            TempData["Error"] = $"Workflow '{workflow.Name}' tidak bisa dihapus: masih dipakai {ex.ModuleCount} module. Lepaskan tombol aksinya dulu.";
+        }
+        catch (WorkflowNotFoundException)
+        {
+            return NotFound();
+        }
+        return RedirectToAction(nameof(Index));
+    });
+
+    // ---- create / edit -------------------------------------------------------------------------
+
+    [HttpGet]
+    public Task<IActionResult> Create(CancellationToken ct) => GuardAsync(async () =>
+        View("Form", await WithLookupsAsync(new WorkflowFormViewModel(), ct)));
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public Task<IActionResult> Create(WorkflowFormViewModel model, CancellationToken ct) => GuardAsync(async () =>
+    {
+        var input = ToInput(model);
+        if (input is not null)
+        {
+            try
+            {
+                var created = await workflows.CreateAsync(input, CurrentUser, ct);
+                TempData["Message"] = $"Workflow '{created.Name}' dibuat sebagai draft.";
+                return RedirectToAction(nameof(Index));
+            }
+            catch (Exception ex) when (AddModelErrors(ex)) { }
+        }
+        return View("Form", await WithLookupsAsync(model, ct));
+    });
+
+    [HttpGet]
+    public Task<IActionResult> Edit(Guid id, CancellationToken ct) => GuardAsync(async () =>
+    {
+        var workflow = await workflows.GetAsync(id, ct);
+        if (workflow is null) return NotFound();
+        var model = new WorkflowFormViewModel
+        {
+            Id = workflow.Id, Code = workflow.Code, Name = workflow.Name, Description = workflow.Description, Status = workflow.Status,
+            StepsJson = WorkflowJson.SerializeSteps(workflow.Steps),
+        };
+        return View("Form", await WithLookupsAsync(model, ct));
+    });
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public Task<IActionResult> Edit(Guid id, WorkflowFormViewModel model, CancellationToken ct) => GuardAsync(async () =>
+    {
+        model.Id = id;
+        if (await workflows.GetAsync(id, ct) is null) return NotFound();
+
+        var input = ToInput(model);
+        if (input is not null)
+        {
+            try
+            {
+                var updated = await workflows.UpdateAsync(id, input, CurrentUser, ct);
+                TempData["Message"] = $"Workflow '{updated.Name}' disimpan.";
+                return RedirectToAction(nameof(Index));
+            }
+            catch (WorkflowNotFoundException)
+            {
+                return NotFound();
+            }
+            catch (Exception ex) when (AddModelErrors(ex)) { }
+        }
+        return View("Form", await WithLookupsAsync(model, ct));
+    });
+
+    // ---- check (builder screen: reasons are shown in full) ---------------------------------------
+
+    /// <summary>"Periksa": the form's own unsaved steps against the database and the flags. Nothing is executed.</summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> Check([FromBody] JsonElement request, CancellationToken ct)
+    {
+        try
+        {
+            // read with the same JSON rules the steps are stored with (string enums)
+            List<WorkflowStep> steps;
+            try
+            {
+                steps = request.ValueKind == JsonValueKind.Object && request.TryGetProperty("steps", out var raw)
+                    ? WorkflowJson.DeserializeSteps(raw.GetRawText())
+                    : [];
+            }
+            catch (JsonException)
+            {
+                Response.StatusCode = StatusCodes.Status400BadRequest;
+                return Json(new { message = "Daftar langkah tidak dapat dibaca." });
+            }
+
+            var issues = WorkflowInputValidator.Validate(new WorkflowInput { Code = "check", Name = "check", Steps = steps })
+                .Select(e => new WorkflowIssue(true, e)).ToList();
+            issues.AddRange(await checker.CheckAsync(steps, ct));
+            return Json(new { issues = issues.Select(i => new { isError = i.IsError, message = i.Message }) });
+        }
+        catch (SqlException ex)
+        {
+            logger.LogError(ex, "Workflow check could not reach the database.");
+            Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            return Json(new { message = "Database tidak tersedia." });
+        }
+    }
+
+    // ---- internals -----------------------------------------------------------------------------
+
+    /// <summary>Reads the posted step list into an input, or returns null with the problem added to ModelState.</summary>
+    private WorkflowInput? ToInput(WorkflowFormViewModel model)
+    {
+        try
+        {
+            return new WorkflowInput
+            {
+                Code = model.Code?.Trim() ?? "",
+                Name = model.Name?.Trim() ?? "",
+                Description = string.IsNullOrWhiteSpace(model.Description) ? null : model.Description.Trim(),
+                Steps = WorkflowJson.DeserializeSteps(model.StepsJson),
+            };
+        }
+        catch (JsonException)
+        {
+            ModelState.AddModelError("", "Daftar langkah tidak dapat dibaca. Muat ulang halaman lalu coba lagi.");
+            return null;
+        }
+    }
+
+    /// <summary>Exception filter used for its side effect: turns expected failures into form errors.</summary>
+    private bool AddModelErrors(Exception ex)
+    {
+        switch (ex)
+        {
+            case WorkflowValidationException v:
+                foreach (var e in v.Errors) ModelState.AddModelError("", e);
+                return true;
+            case DuplicateWorkflowCodeException d:
+                ModelState.AddModelError("", $"Kode workflow '{d.Code}' sudah dipakai.");
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private async Task<WorkflowFormViewModel> WithLookupsAsync(WorkflowFormViewModel model, CancellationToken ct)
+    {
+        model.DataSources = (await dataSources.ListAsync(ct))
+            .OrderBy(d => d.Code)
+            .Select(d => new StepSourceOption(d.Id,
+                $"{d.Code} - {d.Name} ({DataSourceDisplay.ModeLabel(d.Mode)}, {(d.StatementType == StatementType.Command ? "Command" : "Query")})"))
+            .ToList();
+
+        if (model.IsEdit && model.Id is { } id)
+        {
+            model.Status = (await workflows.GetAsync(id, ct))?.Status ?? model.Status;
+            model.History = (await workflows.ListTrackingAsync(id, HistoryRows, ct))
+                .Select(t => new TrackingRow(t.Created.ToLocalTime(), t.RunId, t.StepCode, t.StepName, t.Status, t.Message, t.DurationMs, t.ActionCode))
+                .ToList();
+        }
+        return model;
+    }
+
+    private async Task<IActionResult> GuardAsync(Func<Task<IActionResult>> action)
+    {
+        try
+        {
+            return await action();
+        }
+        catch (SqlException ex)
+        {
+            logger.LogError(ex, "Workflow screen could not reach the database.");
+            Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            return View(UnavailableView);
+        }
+    }
+}

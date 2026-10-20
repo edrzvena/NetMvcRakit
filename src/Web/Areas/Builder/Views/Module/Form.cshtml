@@ -171,6 +171,22 @@
                     Aksi Detail, Ubah, dan Hapus butuh <em>Kolom kunci</em> di tab Display.
                 </div>
             </div>
+
+            <div class="border rounded p-3 mb-3" data-types="table form">
+                <h2 class="h5">Aksi: jalankan workflow (opsional)</h2>
+                <p class="small text-muted mb-2">
+                    Tiap aksi menjadi satu tombol yang menjalankan sebuah <a asp-area="Builder" asp-controller="Workflow" asp-action="Index">workflow</a>.
+                    Pada module <strong>Form</strong> tombol ada di samping Simpan dan mengirim isian form (divalidasi seperti Simpan; dibaca workflow lewat
+                    <code>FormField</code>). Pada module <strong>Table</strong> tombol ada di atas grid, atau di setiap baris bila <em>per baris</em> dicentang
+                    (kunci baris masuk sebagai <code>RouteValue</code> <code>id</code>; butuh <em>Kolom kunci</em> di tab Display).
+                    @if (!Model.WriteEnabled)
+                    {
+                        <span class="text-warning">Penulisan sedang dinonaktifkan (<code>Rakit:Db:AllowWrite = false</code>): langkah bertipe Command ditolak saat dijalankan.</span>
+                    }
+                </p>
+                <div id="actions" data-workflows="@System.Text.Json.JsonSerializer.Serialize(Model.Workflows.Select(w => new { id = w.Id, label = $"{w.Name} ({w.Code})" + (w.Status == Rakit.Core.Workflows.WorkflowStatus.Published ? "" : " - draft") }))"></div>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="add-action">+ Aksi</button>
+            </div>
         </div>
 
         @* ---------------- Isi (Page / Html) ---------------- *@

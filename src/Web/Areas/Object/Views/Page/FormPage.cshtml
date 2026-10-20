@@ -16,6 +16,7 @@
 }
 
 <div id="form-page" data-record-url="@Url.Action("RecordInsert", "Page", new { area = "Object", moduleId = Model.Id })"
+     data-action-url="@Url.Action("RunAction", "Page", new { area = "Object", moduleId = Model.Id, code = "__CODE__" })"
      data-lookup-url="@Url.Action("Lookup", "Page", new { area = "Object", moduleId = Model.Id, field = "__FIELD__" })">
     @Html.AntiForgeryToken()
     @if (!writeEnabled)
@@ -31,6 +32,11 @@
             <partial name="_RecordFields" model="fields" />
             <button type="submit" class="btn btn-primary" id="record-save">Simpan</button>
             <button type="button" class="btn btn-outline-secondary" id="record-reset">Kosongkan</button>
+            @foreach (var a in Model.Config.Actions)
+            {
+                var style = ModuleAction.Styles.Contains(a.Style ?? "", StringComparer.OrdinalIgnoreCase) ? a.Style!.ToLowerInvariant() : "primary";
+                <button type="button" class="btn btn-@style ms-2" data-action="@a.Code.Trim()" data-confirm="@a.Confirm">@a.Label.Trim()</button>
+            }
         </fieldset>
     </form>
 </div>

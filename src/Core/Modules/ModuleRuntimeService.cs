@@ -31,7 +31,7 @@ public sealed record ModuleListColumn(string Field, string Label, bool Sortable,
 /// <param name="HasNext">With a total: more rows exist after this page. Without one: this page is full.</param>
 /// <param name="OrderBy">The sort that was actually applied (canonical field spelling), or null.</param>
 /// <param name="Keys">One raw key text per row (the <c>display.keyField</c> column, invariant culture; null = that row has no key),
-/// only when the module has a Detail, Update or Delete source and the result has that column. Otherwise null.</param>
+/// only when the module has a Detail, Update or Delete source or a per-row workflow button, and the result has that column. Otherwise null.</param>
 public sealed record ModuleListResult(
     Module Module,
     IReadOnlyList<ModuleListColumn> Columns,
@@ -173,7 +173,9 @@ public sealed class ModuleRuntimeService(
     {
         var source = config.Source;
         var keyField = config.Display.KeyField?.Trim();
-        if (string.IsNullOrEmpty(keyField) || (source.Detail is null && source.Update is null && source.Delete is null)) return null;
+        var needsKeys = source.Detail is not null || source.Update is not null || source.Delete is not null
+                        || config.Actions.Any(a => a.PerRow);
+        if (string.IsNullOrEmpty(keyField) || !needsKeys) return null;
 
         var index = IndexOf(list.Columns, keyField);
         if (index < 0) return null;

@@ -9,6 +9,7 @@ using Rakit.Core.DataSources;
 using Rakit.Core.Modules;
 using Rakit.Core.Schema;
 using Rakit.Core.Sql;
+using Rakit.Core.Workflows;
 using Rakit.Web.Areas.Builder.Models;
 using Rakit.Web.Areas.Object.Models;
 
@@ -22,6 +23,7 @@ public class ModuleController(
     IDataSourceService dataSourceService,
     IModuleRuntimeService runtime,
     IModuleVisualService visual,
+    IWorkflowRepository workflows,
     IOptions<RakitDbOptions> dbOptions,
     ILogger<ModuleController> logger) : Controller
 {
@@ -52,7 +54,8 @@ public class ModuleController(
         if (module is null) return NotFound();
 
         var problem = (HasListSource(module.Type) ? await ListSourceProblemAsync(module.Config.Source.List?.DataSourceId, module.Type, ct) : null)
-            ?? (await RecordSourceProblemsAsync(module.Config, ct)).FirstOrDefault();
+            ?? (await RecordSourceProblemsAsync(module.Config, ct)).FirstOrDefault()
+            ?? (await ActionProblemsAsync(module.Config, ct)).FirstOrDefault();
         if (problem is not null)
         {
             TempData["Error"] = $"Module '{module.Name}' belum bisa dipublikasikan: {problem}";
@@ -366,6 +369,8 @@ public class ModuleController(
             config.Form = new ModuleForm();
             config.Display = new ModuleDisplay();
         }
+        // Workflow buttons belong to Table and Form modules only.
+        if (model.Type is not (ModuleType.Table or ModuleType.Form)) config.Actions = [];
         var input = new ModuleInput
         {
             Name = model.Name?.Trim() ?? "",
@@ -388,6 +393,10 @@ public class ModuleController(
         var recordProblems = await RecordSourceProblemsAsync(config, ct);
         foreach (var e in recordProblems) ModelState.AddModelError("", e);
         if (recordProblems.Count > 0) return null;
+
+        var actionProblems = await ActionProblemsAsync(config, ct);
+        foreach (var e in actionProblems) ModelState.AddModelError("", e);
+        if (actionProblems.Count > 0) return null;
 
         if (model.Type == ModuleType.Page)
         {
@@ -470,6 +479,26 @@ public class ModuleController(
                 .. ModuleInputValidator.ValidateLookupSourceKinds(config.Form.Fields, KindOf)];
     }
 
+    /// <summary>
+    /// Errors for the workflow buttons: the workflow must exist. A Draft workflow is allowed (its button fails until it is
+    /// published) and is only noted.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> ActionProblemsAsync(ModuleConfig config, CancellationToken ct)
+    {
+        if (config.Actions.Count == 0) return [];
+
+        var known = (await workflows.ListAsync(ct)).ToDictionary(w => w.Id);
+        var errors = new List<string>();
+        foreach (var action in config.Actions)
+        {
+            if (!known.TryGetValue(action.WorkflowId, out var workflow))
+                errors.Add($"Aksi '{action.Code}': workflow tidak ditemukan.");
+            else if (workflow.Status != WorkflowStatus.Published)
+                notes.Add($"Catatan: workflow '{workflow.Name}' untuk aksi '{action.Code}' masih Draft, tombolnya gagal sampai workflow dipublikasikan.");
+        }
+        return errors;
+    }
+
     /// <summary>Why the data source cannot be a module's list source (gone, or a Command data source), or null when it is fine.</summary>
     private async Task<string?> ListSourceProblemAsync(Guid? dataSourceId, ModuleType type, CancellationToken ct)
     {
@@ -513,6 +542,7 @@ public class ModuleController(
             .Select(d => new DataSourceOption(d.Id, d.Code, d.Name, ModuleDisplayText.ModeLabel(d.Mode)))
             .ToList();
         model.WriteEnabled = dbOptions.Value.AllowWrite;
+        model.Workflows = await workflows.ListAsync(ct);
         model.EmbeddableModules = (await modules.ListAsync(ct: ct)).Where(m => m.Type != ModuleType.Page).ToList();
 
         if (model.IsEdit && model.Id is { } moduleId)

@@ -10,6 +10,13 @@
     var hasSave = (source.Insert is not null || source.Update is not null) && fields.Count > 0;
     var hasDelete = source.Delete is not null;
     var hasBrowse = hasSave && fields.Any(f => f.Type == FormFieldType.Browse);
+
+    // Workflow buttons: page-level ones sit in the toolbar, per-row ones are drawn by the script from data-row-actions.
+    string StyleOf(ModuleAction a) => ModuleAction.Styles.Contains(a.Style ?? "", StringComparer.OrdinalIgnoreCase) ? a.Style!.ToLowerInvariant() : "primary";
+    var pageActions = Model.Config.Actions.Where(a => !a.PerRow).ToList();
+    var rowActions = Model.Config.Actions.Where(a => a.PerRow)
+        .Select(a => new { code = a.Code.Trim(), label = a.Label.Trim(), style = StyleOf(a), confirm = a.Confirm }).ToList();
+    var hasActions = Model.Config.Actions.Count > 0;
 }
 
 <h1 class="h3 mb-1">@Model.Name</h1>
@@ -21,8 +28,10 @@
 <div id="object-page" data-url="@Url.Action("Data", "Page", new { area = "Object", moduleId = Model.Id })"
      data-record-url="@Url.Action("RecordInsert", "Page", new { area = "Object", moduleId = Model.Id })"
      data-lookup-url="@Url.Action("Lookup", "Page", new { area = "Object", moduleId = Model.Id, field = "__FIELD__" })"
+     data-action-url="@Url.Action("RunAction", "Page", new { area = "Object", moduleId = Model.Id, code = "__CODE__" })"
+     data-row-actions="@System.Text.Json.JsonSerializer.Serialize(rowActions)"
      data-take="@Model.Config.Display.Take" data-max-take="@Model.Config.Display.MaxTake">
-    @if (hasSave || hasDelete)
+    @if (hasSave || hasDelete || hasActions)
     {
         @Html.AntiForgeryToken()
     }
@@ -35,10 +44,17 @@
             <button type="submit" class="btn btn-sm btn-primary">Cari</button>
             <button type="button" class="btn btn-sm btn-outline-secondary" id="search-clear">Reset</button>
         </div>
-        @if (hasSave)
+        @if (hasSave || pageActions.Count > 0)
         {
-            <div class="col-auto ms-auto">
-                <button type="button" class="btn btn-sm btn-success d-none" id="record-add">+ Tambah</button>
+            <div class="col-auto ms-auto d-flex gap-1">
+                @foreach (var a in pageActions)
+                {
+                    <button type="button" class="btn btn-sm btn-@StyleOf(a)" data-action="@a.Code.Trim()" data-confirm="@a.Confirm">@a.Label.Trim()</button>
+                }
+                @if (hasSave)
+                {
+                    <button type="button" class="btn btn-sm btn-success d-none" id="record-add">+ Tambah</button>
+                }
             </div>
         }
     </form>

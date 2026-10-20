@@ -1,0 +1,115 @@
+@using Rakit.Core.Workflows
+@using System.Text.Json
+@model WorkflowFormViewModel
+@{
+    ViewData["Title"] = Model.IsEdit ? $"Ubah {Model.Name}" : "Workflow baru";
+    var sources = JsonSerializer.Serialize(Model.DataSources.Select(s => new { id = s.Id, label = s.Label }));
+}
+
+<p><a asp-area="Builder" asp-controller="Workflow" asp-action="Index">&larr; Workflow</a></p>
+<h1 class="h3 mb-3">
+    @(Model.IsEdit ? "Ubah Workflow" : "Workflow baru")
+    @if (Model.IsEdit)
+    {
+        <span class="badge fs-6 @(Model.Status == WorkflowStatus.Published ? "bg-success" : "bg-secondary")">@WorkflowDisplayText.StatusLabel(Model.Status)</span>
+    }
+</h1>
+
+<div asp-validation-summary="All" class="alert alert-danger"></div>
+
+@if (Model.IsEdit && Model.Status == WorkflowStatus.Published)
+{
+    <div class="alert alert-info" role="note">
+        Workflow ini <strong>Published</strong>: perubahan yang disimpan langsung berlaku untuk tombol yang menjalankannya.
+        Untuk mengerjakannya tanpa mengganggu pengguna, salin dulu lalu ubah salinan draft-nya.
+    </div>
+}
+
+<form id="workflow-form" method="post" asp-area="Builder" asp-controller="Workflow" asp-action="@(Model.IsEdit ? "Edit" : "Create")" asp-route-id="@Model.Id">
+    <input type="hidden" id="StepsJson" name="StepsJson" value="@Model.StepsJson" />
+
+    <div class="row g-3 mb-3">
+        <div class="col-md-3">
+            <label class="form-label" for="Code">Kode</label>
+            <input class="form-control" id="Code" name="Code" value="@Model.Code" maxlength="@WorkflowInputValidator.MaxCodeLength" required />
+            <div class="form-text">Huruf, angka, <code>_</code> atau <code>-</code>; unik.</div>
+        </div>
+        <div class="col-md-5">
+            <label class="form-label" for="Name">Nama</label>
+            <input class="form-control" id="Name" name="Name" value="@Model.Name" maxlength="@WorkflowInputValidator.MaxNameLength" required />
+        </div>
+    </div>
+    <div class="mb-3">
+        <label class="form-label" for="Description">Deskripsi</label>
+        <textarea class="form-control" id="Description" name="Description" rows="2" maxlength="@WorkflowInputValidator.MaxDescriptionLength">@Model.Description</textarea>
+    </div>
+
+    <div class="border rounded p-3 mb-3">
+        <h2 class="h5">Langkah</h2>
+        <p class="small text-muted mb-2">
+            Dijalankan berurutan. Tiap langkah menjalankan satu data source (Query atau Command; tabel, query, atau stored procedure) dan
+            <strong>punya transaksinya sendiri</strong>: prosedur yang mengembalikan nilai selain 0 di-rollback. Bila satu langkah gagal, langkah
+            sesudahnya tidak dijalankan (dicatat sebagai dilewati). Nilai parameter diatur di <em>mapping parameter</em> data source-nya:
+            <code>FormField</code> = isian form pada tombol, <code>RouteValue</code> key <code>id</code> = kunci baris (tombol per baris),
+            <code>UserClaim</code>, <code>Constant</code>, dan <code>StepOutput</code> = hasil langkah sebelumnya.
+        </p>
+        <div class="alert alert-light border small" role="note">
+            Key <code>StepOutput</code> yang tersedia dari langkah berkode <code>kode</code>:
+            <code>kode.return</code> (nilai return prosedur), <code>kode.out.NamaParameter</code> (parameter OUTPUT, mis. <code>create.out.NewId</code>),
+            dan <code>kode.row.NamaKolom</code> (kolom pada baris pertama hasilnya).
+        </div>
+        <div id="steps" data-sources="@sources"></div>
+        <div class="mt-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="add-step">+ Langkah</button>
+            <button type="button" class="btn btn-sm btn-outline-info" id="check-steps">Periksa</button>
+            <span id="check-status" class="ms-2 small text-muted" aria-live="polite"></span>
+        </div>
+        <div id="check-result" class="mt-2" aria-live="polite"></div>
+        <div class="form-text mt-2">
+            <em>Periksa</em> tidak menjalankan apa pun: ia memeriksa data source tiap langkah, urutan output antar-langkah, dan flag
+            (<code>AllowWrite</code>, <code>AllowRawQuery</code>, <code>AllowStoredProcedure</code>). Menjalankan sungguhan dilakukan dari tombol aksi di module.
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Simpan</button>
+    <a class="btn btn-outline-secondary" asp-area="Builder" asp-controller="Workflow" asp-action="Index">Batal</a>
+</form>
+
+@if (Model.IsEdit)
+{
+    <div class="border rounded p-3 mt-4">
+        <h2 class="h5">Riwayat eksekusi (@Model.History.Count terbaru)</h2>
+        @if (Model.History.Count == 0)
+        {
+            <p class="text-muted small mb-0">Belum pernah dijalankan.</p>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead><tr><th>Waktu</th><th>Run</th><th>Langkah</th><th>Status</th><th>Pesan</th><th class="text-end">ms</th><th>Tombol</th></tr></thead>
+                    <tbody>
+                        @foreach (var h in Model.History)
+                        {
+                            <tr>
+                                <td class="text-nowrap">@h.Time.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                                <td><code>@(h.RunId.ToString()[..8])</code></td>
+                                <td>@(string.IsNullOrWhiteSpace(h.StepName) ? h.StepCode : h.StepName) <span class="text-muted">(@h.StepCode)</span></td>
+                                <td>
+                                    <span class="badge @(h.Status == TrackingStatus.Success ? "bg-success" : h.Status == TrackingStatus.Failed ? "bg-danger" : "bg-secondary")">@WorkflowDisplayText.TrackingLabel(h.Status)</span>
+                                </td>
+                                <td>@h.Message</td>
+                                <td class="text-end">@h.DurationMs</td>
+                                <td>@h.ActionCode</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+}
+
+@section Scripts {
+    <script src="~/js/workflow-form.js" asp-append-version="true"></script>
+}

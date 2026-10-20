@@ -49,6 +49,12 @@ public sealed record ObjectChartData(
 /// <summary>What a Widget module's data endpoint answers. <see cref="Text"/> is formatted on the server; <see cref="Value"/> is the raw value (number, boolean or text).</summary>
 public sealed record ObjectWidgetData(object? Value, string? Text, string? Label, string Color, int RefreshSeconds);
 
+/// <param name="Status"><c>success</c>, <c>failed</c> or <c>skipped</c>.</param>
+public sealed record ObjectActionStep(string Code, string Name, string Status);
+
+/// <summary>A workflow button ran all its steps.</summary>
+public sealed record ObjectActionDone(string Message, IReadOnlyList<ObjectActionStep> Steps);
+
 /// <summary>A write went through.</summary>
 public sealed record ObjectDone(string Message);
 

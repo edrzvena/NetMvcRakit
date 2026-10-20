@@ -30,6 +30,11 @@
     config.widget = config.widget || {};
     const widget = config.widget; // Widget module settings, read back from the inputs by collectWidget()
 
+    config.actions = config.actions || [];
+    const actionList = config.actions; // workflow buttons: [{code, label, workflowId, style, confirm, perRow}]
+    const ACTION_STYLES = [['primary', 'Biru'], ['secondary', 'Abu-abu'], ['success', 'Hijau'], ['danger', 'Merah'], ['warning', 'Kuning'], ['info', 'Biru muda'], ['dark', 'Hitam']];
+    const EMPTY_GUID = '00000000-0000-0000-0000-000000000000';
+
     config.chart = config.chart || {};
     const chart = config.chart; // Chart module settings; the series list is edited in place, the rest is read by collectChart()
     chart.series = chart.series || [];
@@ -130,6 +135,7 @@
         if (listTitle) listTitle.textContent = listTitle.dataset['title' + type.charAt(0).toUpperCase() + type.slice(1)] || listTitle.dataset.titleTable;
         // the preview tab is shared by Widget and Chart: a card is narrow, a chart takes the whole width
         $('visual-preview-host').className = 'mt-2' + (type === 'widget' ? ' col-sm-8 col-md-5 col-lg-4' : '');
+        renderActions(); // the "per baris" box only exists for a Table
         const active = document.querySelector('.nav-tabs .nav-link.active');
         if (active && active.closest('li').classList.contains('d-none')) $('tab-source').click(); // never stay on a tab that just disappeared
     }
@@ -407,6 +413,68 @@
         return out;
     }
 
+    // ---- Aksi: workflow buttons (Table and Form modules) ----
+    const workflowOptions = JSON.parse($('actions').dataset.workflows || '[]'); // [{id, label}]
+    function renderActions() {
+        const host = $('actions');
+        const isTable = currentType() === 'table';
+        if (actionList.length === 0) {
+            host.replaceChildren(el('div', { class: 'text-muted small mb-2', text: 'Belum ada aksi.' }));
+            return;
+        }
+        const rows = actionList.map((a, i) => {
+            const code = el('input', { class: 'form-control form-control-sm', value: a.code || '', maxlength: '50', placeholder: 'kode, mis. submit', 'aria-label': 'Kode aksi ' + (i + 1) });
+            const label = el('input', { class: 'form-control form-control-sm', value: a.label || '', maxlength: '100', placeholder: 'teks tombol', 'aria-label': 'Label aksi ' + (i + 1) });
+            const workflow = el('select', { class: 'form-select form-select-sm', 'aria-label': 'Workflow aksi ' + (i + 1) });
+            workflow.appendChild(el('option', { value: '', text: '- pilih workflow -' }));
+            workflowOptions.forEach((o) => { const opt = el('option', { value: o.id, text: o.label }); if (o.id === a.workflowId) opt.selected = true; workflow.appendChild(opt); });
+            if (a.workflowId && a.workflowId !== EMPTY_GUID && !workflowOptions.some((o) => o.id === a.workflowId)) {
+                const gone = el('option', { value: a.workflowId, text: '(tidak ditemukan) ' + a.workflowId });
+                gone.selected = true;
+                workflow.appendChild(gone);
+            }
+            const style = el('select', { class: 'form-select form-select-sm', 'aria-label': 'Warna tombol ' + (i + 1) });
+            ACTION_STYLES.forEach(([v, t]) => { const o = el('option', { value: v, text: t }); if (v === (a.style || 'primary')) o.selected = true; style.appendChild(o); });
+            const confirm = el('input', { class: 'form-control form-control-sm', value: a.confirm || '', maxlength: '200', placeholder: 'konfirmasi (opsional), mis. Yakin?', 'aria-label': 'Konfirmasi aksi ' + (i + 1) });
+            const perRow = el('input', { type: 'checkbox', class: 'form-check-input', id: 'action-row-' + i });
+            perRow.checked = !!a.perRow;
+
+            code.addEventListener('input', () => { a.code = code.value.trim(); });
+            label.addEventListener('input', () => { a.label = label.value; });
+            workflow.addEventListener('change', () => { a.workflowId = workflow.value; });
+            style.addEventListener('change', () => { a.style = style.value; });
+            confirm.addEventListener('input', () => { a.confirm = confirm.value; });
+            perRow.addEventListener('change', () => { a.perRow = perRow.checked; });
+            const move = (d) => () => { const j = i + d; if (j < 0 || j >= actionList.length) return; [actionList[i], actionList[j]] = [actionList[j], actionList[i]]; renderActions(); };
+
+            return el('div', { class: 'border rounded p-2 mb-2' }, [
+                el('div', { class: 'row g-2 mb-1 align-items-center' }, [
+                    el('div', { class: 'col-md-2' }, [code]), el('div', { class: 'col-md-3' }, [label]),
+                    el('div', { class: 'col-md-4' }, [workflow]), el('div', { class: 'col-md-1' }, [style]),
+                    el('div', { class: 'col-md-2 text-nowrap text-end' }, [
+                        iconButton('↑', 'Naik', move(-1), i === 0), iconButton('↓', 'Turun', move(1), i === actionList.length - 1),
+                        iconButton('×', 'Hapus', () => { actionList.splice(i, 1); renderActions(); }),
+                    ]),
+                ]),
+                el('div', { class: 'row g-2 align-items-center' }, [
+                    el('div', { class: 'col-md-6' }, [confirm]),
+                    isTable ? el('div', { class: 'col-md-4 form-check ps-4' }, [perRow, el('label', { class: 'form-check-label small', for: 'action-row-' + i, text: 'tombol per baris (butuh Kolom kunci)' })]) : el('div'),
+                ]),
+            ]);
+        });
+        host.replaceChildren(...rows);
+    }
+    $('add-action').addEventListener('click', () => { actionList.push({ code: '', label: '', workflowId: '', style: 'primary', confirm: '', perRow: false }); renderActions(); });
+
+    function collectActions() {
+        const isTable = currentType() === 'table';
+        return actionList.filter((a) => (a.code || '').trim() || (a.label || '').trim() || a.workflowId).map((a) => {
+            const out = { code: (a.code || '').trim(), label: (a.label || '').trim(), workflowId: a.workflowId || EMPTY_GUID, style: a.style || 'primary', perRow: isTable && !!a.perRow };
+            if ((a.confirm || '').trim()) out.confirm = a.confirm.trim();
+            return out;
+        });
+    }
+
     // ---- Chart tab ----
     const chartInput = (name) => $('chart-' + name);
     const isRound = () => chartInput('kind').value === 'pie' || chartInput('kind').value === 'doughnut';
@@ -579,7 +647,7 @@
             }),
         };
         if (keyField) display.keyField = keyField;
-        return { display: display, form: { fields: formFields }, access: config.access || { view: ['*'] } };
+        return { display: display, form: { fields: formFields }, actions: collectActions(), access: config.access || { view: ['*'] } };
     }
     form.addEventListener('submit', () => { configInput.value = JSON.stringify(collectConfig()); });
 

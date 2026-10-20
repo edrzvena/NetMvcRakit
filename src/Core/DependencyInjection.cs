@@ -9,6 +9,7 @@ using Rakit.Core.Modules;
 using Rakit.Core.Procedures;
 using Rakit.Core.Schema;
 using Rakit.Core.Sql;
+using Rakit.Core.Workflows;
 
 namespace Rakit.Core;
 
@@ -44,6 +45,10 @@ public static class DependencyInjection
         services.AddSingleton<IModuleRecordService, ModuleRecordService>();
         services.AddSingleton<IModuleLookupService, ModuleLookupService>();
         services.AddSingleton<IModuleVisualService, ModuleVisualService>();
+        services.AddSingleton<IWorkflowRepository, WorkflowRepository>();
+        services.AddSingleton<IWorkflowChecker, WorkflowChecker>();
+        services.AddSingleton<IWorkflowRunner, WorkflowRunner>();
+        services.AddSingleton<IModuleActionService, ModuleActionService>();
 
         return services;
     }

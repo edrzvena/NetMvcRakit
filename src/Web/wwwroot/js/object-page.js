@@ -15,6 +15,8 @@
     const defaultTake = parseInt(root.dataset.take, 10) || 10;
     const maxTake = parseInt(root.dataset.maxTake, 10) || 100;
     const CONTROL = ['_skip', '_take', '_order', '_q'];
+    let rowActions = []; // workflow buttons drawn on every row: [{code, label, style, confirm}]
+    try { rowActions = JSON.parse(root.dataset.rowActions || '[]') || []; } catch (e) { rowActions = []; }
 
     // ---- state, read from / written to the URL ----
     const params = new URLSearchParams(window.location.search);
@@ -74,7 +76,7 @@
         state.order = data.orderBy || '';
 
         const actions = data.actions || {};
-        const showActions = (actions.canEdit || actions.canDelete) && Array.isArray(data.keys);
+        const showActions = (actions.canEdit || actions.canDelete || rowActions.length > 0) && Array.isArray(data.keys);
         lastRowCount = data.rows.length;
         const addButton = $('record-add');
         if (addButton) addButton.classList.toggle('d-none', !actions.canAdd);
@@ -110,6 +112,12 @@
                     const buttons = [];
                     if (key != null && actions.canEdit) buttons.push(el('button', { type: 'button', class: 'btn btn-sm btn-outline-primary', text: 'Ubah', onclick: () => openEdit(key) }));
                     if (key != null && actions.canDelete) buttons.push(el('button', { type: 'button', class: 'btn btn-sm btn-outline-danger', text: 'Hapus', onclick: () => openDelete(key, row) }));
+                    if (key != null) {
+                        rowActions.forEach((a) => buttons.push(el('button', {
+                            type: 'button', class: 'btn btn-sm btn-outline-' + a.style, text: a.label,
+                            onclick: (ev) => runAction(a, key, ev.currentTarget),
+                        })));
+                    }
                     cells.push(el('td', { class: 'text-end text-nowrap' }, buttons));
                 }
                 return el('tr', {}, cells);
@@ -240,6 +248,26 @@
             }
         });
     }
+
+    // ---- workflow buttons: toolbar ones (data-action) and per-row ones (rowActions) run a workflow on the server ----
+    async function runAction(action, key, button) {
+        if (action.confirm && !window.confirm(action.confirm)) return;
+        clearMessage();
+        let url = (root.dataset.actionUrl || '').replace('__CODE__', encodeURIComponent(action.code));
+        if (key != null) url += '/' + encodeURIComponent(key);
+        if (button) button.disabled = true;
+        const res = await rf.send('POST', url);
+        if (button) button.disabled = false;
+        if (res.ok) {
+            showMessage((res.data && res.data.message) || 'Aksi dijalankan.', true);
+            load(); // the workflow may have changed the data
+        } else {
+            showMessage(rf.failureText(res), false);
+        }
+    }
+    document.querySelectorAll('[data-action]').forEach((button) => {
+        button.addEventListener('click', () => runAction({ code: button.dataset.action, confirm: button.dataset.confirm }, null, button));
+    });
 
     // -- delete
     function openDelete(key, row) {

@@ -208,6 +208,35 @@ public sealed record ModuleRecordActions(bool CanAdd, bool CanEdit, bool CanDele
     }
 }
 
+/// <summary>
+/// A button that runs a workflow. On a Table module it sits in the toolbar, or on every row (<see cref="PerRow"/>, the row's
+/// record key becomes RouteValue <c>id</c>); on a Form module it sits next to Save and sends the (validated) form values.
+/// </summary>
+public sealed class ModuleAction
+{
+    public const int MaxCodeLength = 50;
+    public const int MaxLabelLength = 100;
+    public const int MaxConfirmLength = 200;
+    public const int MaxPerModule = 10;
+
+    /// <summary>The Bootstrap button colours an action can use (lower-case in JSON).</summary>
+    public static readonly IReadOnlyList<string> Styles = ["primary", "secondary", "success", "danger", "warning", "info", "dark"];
+
+    /// <summary>Identifies the button in the URL; letters, digits, '_' and '-', starting with a letter.</summary>
+    public string Code { get; set; } = "";
+    public string Label { get; set; } = "";
+    public Guid WorkflowId { get; set; }
+
+    /// <summary>One of <see cref="Styles"/>; blank = primary.</summary>
+    public string? Style { get; set; }
+
+    /// <summary>When filled, the visitor must confirm with this text before the workflow runs.</summary>
+    public string? Confirm { get; set; }
+
+    /// <summary>Table only: one button per row instead of one in the toolbar. Needs the module's key field.</summary>
+    public bool PerRow { get; set; }
+}
+
 /// <summary>Stored, not enforced until a login phase exists (no OIDC yet).</summary>
 public sealed class ModuleAccess
 {
@@ -229,6 +258,9 @@ public sealed class ModuleConfig
 
     /// <summary>Chart modules only.</summary>
     public ModuleChart? Chart { get; set; }
+
+    /// <summary>Workflow buttons (Table and Form modules only).</summary>
+    public List<ModuleAction> Actions { get; set; } = [];
     public ModuleAccess Access { get; set; } = new();
 }
 

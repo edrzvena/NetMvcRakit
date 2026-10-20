@@ -40,6 +40,27 @@
         }
     });
 
+    // Workflow buttons: the same validated form values go to the workflow instead of the Insert data source.
+    form.querySelectorAll('[data-action]').forEach((button) => {
+        button.addEventListener('click', async () => {
+            if (button.dataset.confirm && !window.confirm(button.dataset.confirm)) return;
+            clearMessage();
+            rf.clearErrors();
+            button.disabled = true;
+            const url = (root.dataset.actionUrl || '').replace('__CODE__', encodeURIComponent(button.dataset.action));
+            const res = await rf.send('POST', url, new FormData(form));
+            button.disabled = false;
+            if (res.ok) {
+                showMessage((res.data && res.data.message) || 'Aksi dijalankan.', true);
+                await fresh();
+            } else if (res.status === 400) {
+                rf.showErrors(res);
+            } else {
+                showMessage(rf.failureText(res), false);
+            }
+        });
+    });
+
     $('record-reset').addEventListener('click', () => { clearMessage(); rf.clearErrors(); rf.reset(); });
 
     fresh();

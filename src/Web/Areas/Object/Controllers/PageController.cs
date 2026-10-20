@@ -8,6 +8,7 @@ using Rakit.Core.Config;
 using Rakit.Core.DataSources;
 using Rakit.Core.Modules;
 using Rakit.Core.Sql;
+using Rakit.Core.Workflows;
 using Rakit.Web.Areas.Object.Models;
 
 namespace Rakit.Web.Areas.Object.Controllers;
@@ -22,7 +23,7 @@ namespace Rakit.Web.Areas.Object.Controllers;
 [Route("object/page")]
 public class PageController(
     IModuleRuntimeService runtime, IModuleRecordService records, IModuleLookupService lookups, IModuleVisualService visual,
-    IOptions<RakitDbOptions> dbOptions, ILogger<PageController> logger)
+    IModuleActionService actions, IOptions<RakitDbOptions> dbOptions, ILogger<PageController> logger)
     : Controller
 {
     private const int MaxWriteBodyBytes = 262_144;
@@ -168,6 +169,35 @@ public class PageController(
     {
         await records.DeleteAsync(moduleId, key, await HttpParameterContext.FromAsync(HttpContext, ct), ct);
         return Json(new ObjectDone("Data dihapus."));
+    });
+
+    // ---- workflow buttons ------------------------------------------------------------------------
+    // POST with the anti-forgery token like the record writes. The button's workflow runs on the server; a Form module's
+    // values are validated against its fields first (400 with per-field errors), a per-row button of a Table also names the row.
+    // A step that fails is 422 (the database refused on purpose, or a procedure returned a non-zero code), 503 (set-up problem),
+    // 504 (timeout) or 500, always with a text meant for end users.
+
+    [HttpPost("{moduleId:guid}/action/{code}"), ValidateAntiForgeryToken, RequestSizeLimit(MaxWriteBodyBytes)]
+    public Task<IActionResult> RunAction(Guid moduleId, string code, CancellationToken ct) => RunActionAsync(moduleId, code, null, ct);
+
+    [HttpPost("{moduleId:guid}/action/{code}/{key}"), ValidateAntiForgeryToken, RequestSizeLimit(MaxWriteBodyBytes)]
+    public Task<IActionResult> RunRowAction(Guid moduleId, string code, string key, CancellationToken ct) => RunActionAsync(moduleId, code, key, ct);
+
+    private Task<IActionResult> RunActionAsync(Guid moduleId, string code, string? key, CancellationToken ct) => RecordAsync(async () =>
+    {
+        var context = await HttpParameterContext.FromAsync(HttpContext, ct);
+        var result = await actions.RunAsync(moduleId, code, key, context.Form, context, ct);
+        if (result.Success)
+            return Json(new ObjectActionDone(result.Message,
+                result.Steps.Select(s => new ObjectActionStep(s.Code, s.Name, s.Status.ToString().ToLowerInvariant())).ToList()));
+
+        return Error(result.Failure switch
+        {
+            WorkflowFailureKind.Business or WorkflowFailureKind.Rejected => StatusCodes.Status422UnprocessableEntity,
+            WorkflowFailureKind.Unavailable => StatusCodes.Status503ServiceUnavailable,
+            WorkflowFailureKind.Timeout => StatusCodes.Status504GatewayTimeout,
+            _ => StatusCodes.Status500InternalServerError,
+        }, result.Message);
     });
 
     /// <summary>

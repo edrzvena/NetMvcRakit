@@ -68,10 +68,63 @@ public static partial class ModuleInputValidator
                 break;
         }
 
+        ValidateActions(config, input.Type, errors);
+
         if (config.Access?.View is { } view && view.Any(r => string.IsNullOrWhiteSpace(r) || r.Trim().Length > MaxRoleLength))
             errors.Add($"Akses view berisi entri kosong atau lebih dari {MaxRoleLength} karakter.");
 
         return errors;
+    }
+
+    [GeneratedRegex(@"^[A-Za-z][A-Za-z0-9_-]{0,49}$")]
+    private static partial Regex ActionCodePattern();
+
+    /// <summary>Workflow buttons: Table and Form modules only. Whether the workflow exists is checked by the builder screen.</summary>
+    private static void ValidateActions(ModuleConfig config, ModuleType type, List<string> errors)
+    {
+        var actions = config.Actions ?? [];
+        if (actions.Count == 0) return;
+
+        if (type is not (ModuleType.Table or ModuleType.Form))
+        {
+            errors.Add($"Module {type} tidak punya tombol aksi workflow (hanya Table dan Form).");
+            return;
+        }
+        if (actions.Count > ModuleAction.MaxPerModule)
+            errors.Add($"Satu module maksimal {ModuleAction.MaxPerModule} aksi.");
+
+        var codes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < actions.Count; i++)
+        {
+            var action = actions[i];
+            var code = action.Code?.Trim() ?? "";
+            var label = $"Aksi {i + 1}" + (code.Length > 0 ? $" ('{code}')" : "");
+
+            if (!ActionCodePattern().IsMatch(code))
+                errors.Add($"{label}: kode harus 1-{ModuleAction.MaxCodeLength} karakter, huruf/angka/'_'/'-', diawali huruf.");
+            else if (!codes.Add(code))
+                errors.Add($"{label}: kode dipakai lebih dari sekali.");
+
+            if (string.IsNullOrWhiteSpace(action.Label))
+                errors.Add($"{label}: label wajib diisi.");
+            else if (action.Label.Trim().Length > ModuleAction.MaxLabelLength)
+                errors.Add($"{label}: label maksimal {ModuleAction.MaxLabelLength} karakter.");
+
+            if (action.WorkflowId == Guid.Empty)
+                errors.Add($"{label}: workflow belum dipilih.");
+            if (!string.IsNullOrWhiteSpace(action.Style) && !ModuleAction.Styles.Contains(action.Style.Trim(), StringComparer.OrdinalIgnoreCase))
+                errors.Add($"{label}: warna tombol harus salah satu dari {string.Join(", ", ModuleAction.Styles)}.");
+            if (action.Confirm is { Length: > ModuleAction.MaxConfirmLength })
+                errors.Add($"{label}: teks konfirmasi maksimal {ModuleAction.MaxConfirmLength} karakter.");
+
+            if (action.PerRow)
+            {
+                if (type != ModuleType.Table)
+                    errors.Add($"{label}: tombol per baris hanya untuk module Table.");
+                else if (string.IsNullOrWhiteSpace(config.Display?.KeyField))
+                    errors.Add($"{label}: tombol per baris membutuhkan KeyField di tab Display.");
+            }
+        }
     }
 
     private static void ValidateDisplay(ModuleDisplay? display, List<string> errors)

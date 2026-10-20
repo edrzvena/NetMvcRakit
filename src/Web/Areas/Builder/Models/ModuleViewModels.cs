@@ -51,6 +51,9 @@ public sealed class ModuleFormViewModel
     /// <summary>Command data sources, for Insert / Update / Delete.</summary>
     public IReadOnlyList<DataSourceOption> CommandDataSources { get; set; } = [];
 
+    /// <summary>Workflows a button of a Table or Form module can run (the "Aksi" box).</summary>
+    public IReadOnlyList<Rakit.Core.Workflows.WorkflowSummary> Workflows { get; set; } = [];
+
     /// <summary>Rakit:Db:AllowWrite. When off, Command data sources are refused at runtime and the page shows no write buttons.</summary>
     public bool WriteEnabled { get; set; }
 

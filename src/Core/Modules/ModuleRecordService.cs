@@ -218,7 +218,7 @@ public sealed class ModuleRecordService(
     /// the default of a readonly field. A blank value is left out so the mapping's fallback applies, and a boolean that
     /// was not sent counts as false (an unchecked box is not submitted).
     /// </summary>
-    private static Dictionary<string, string?> ValidateFields(
+    internal static Dictionary<string, string?> ValidateFields(
         Module module, IReadOnlyDictionary<string, string?> submitted, bool forInsert)
     {
         var values = new Dictionary<string, string?>(submitted, StringComparer.OrdinalIgnoreCase);
