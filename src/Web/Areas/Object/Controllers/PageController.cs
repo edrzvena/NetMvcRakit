@@ -43,7 +43,12 @@ public class PageController(
                 ViewData["PageHtml"] = new HtmlString(ModulePageHtml.Render(module.Config.Page?.Html, EmbedMarkup, drop: embedded));
                 return View("HtmlPage", module);
             }
-            return module.Type == ModuleType.Table ? View(module) : View("FormPage", module);
+            return module.Type switch
+            {
+                ModuleType.Table => View(module),
+                ModuleType.Form => View("FormPage", module),
+                _ => NotFound(), // Chart / Widget get their views with the runtime task
+            };
         }
         catch (ModuleNotFoundException)
         {

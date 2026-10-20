@@ -114,6 +114,8 @@ public static class ModuleDisplayText
         ModuleType.Table => "Table",
         ModuleType.Form => "Form",
         ModuleType.Page => "Page / Html",
+        ModuleType.Chart => "Chart",
+        ModuleType.Widget => "Widget",
         _ => type.ToString(),
     };
 

@@ -58,6 +58,14 @@ public static partial class ModuleInputValidator
             case ModuleType.Page:
                 ValidatePageModule(config, errors);
                 break;
+            case ModuleType.Chart:
+                ValidateListOnly(config, "Chart", errors);
+                ValidateChart(config.Chart, errors);
+                break;
+            case ModuleType.Widget:
+                ValidateListOnly(config, "Widget", errors);
+                ValidateWidget(config.Widget, errors);
+                break;
         }
 
         if (config.Access?.View is { } view && view.Any(r => string.IsNullOrWhiteSpace(r) || r.Trim().Length > MaxRoleLength))
@@ -147,6 +155,79 @@ public static partial class ModuleInputValidator
             errors.Add("Module Form membutuhkan setidaknya satu field form.");
         ValidateFormFields(config, errors);
     }
+
+    /// <summary>Chart and Widget modules read one Query data source (List) and nothing else.</summary>
+    private static void ValidateListOnly(ModuleConfig config, string typeName, List<string> errors)
+    {
+        var source = config.Source;
+        if (source?.List is null || source.List.DataSourceId == Guid.Empty)
+            errors.Add($"Module {typeName} membutuhkan data source untuk datanya (List).");
+        if (source?.Detail is not null || source?.Insert is not null || source?.Update is not null || source?.Delete is not null)
+            errors.Add($"Module {typeName} hanya memakai data source List.");
+    }
+
+    private static void ValidateField(string? value, string title, List<string> errors, bool required = true)
+    {
+        var text = value?.Trim() ?? "";
+        if (text.Length == 0) { if (required) errors.Add($"{title} wajib diisi."); }
+        else if (text.Length > ModuleWidget.MaxFieldLength) errors.Add($"{title} maksimal {ModuleWidget.MaxFieldLength} karakter.");
+    }
+
+    private static void ValidateChart(ModuleChart? chart, List<string> errors)
+    {
+        if (chart is null) { errors.Add("Config chart wajib ada."); return; }
+
+        var kindOk = Enum.IsDefined(chart.Kind);
+        if (!kindOk) errors.Add("Jenis chart tidak dikenal.");
+        ValidateField(chart.LabelField, "Kolom label chart", errors);
+
+        var series = chart.Series ?? [];
+        if (series.Count == 0) errors.Add("Chart membutuhkan setidaknya satu seri.");
+        else if (series.Count > ModuleChart.MaxSeries) errors.Add($"Chart maksimal {ModuleChart.MaxSeries} seri.");
+        else if (kindOk && chart.Kind is ChartKind.Pie or ChartKind.Doughnut && series.Count != 1)
+            errors.Add("Chart pie dan doughnut memakai tepat satu seri.");
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < series.Count && i < ModuleChart.MaxSeries; i++)
+        {
+            var s = series[i];
+            var n = i + 1;
+            var column = s.ValueField?.Trim() ?? "";
+            if (column.Length == 0) errors.Add($"Seri {n}: kolom nilai wajib diisi.");
+            else if (column.Length > ModuleWidget.MaxFieldLength) errors.Add($"Seri {n}: kolom nilai maksimal {ModuleWidget.MaxFieldLength} karakter.");
+            else if (!seen.Add(column)) errors.Add($"Seri {n}: kolom '{column}' dipakai lebih dari sekali.");
+            if (s.Label is { Length: > ModuleWidget.MaxLabelLength }) errors.Add($"Seri {n}: label maksimal {ModuleWidget.MaxLabelLength} karakter.");
+            if (!string.IsNullOrWhiteSpace(s.Color) && !ColorPattern().IsMatch(s.Color.Trim()))
+                errors.Add($"Seri {n}: warna harus berbentuk #RRGGBB.");
+        }
+
+        if (chart.Stacked && kindOk && chart.Kind is ChartKind.Pie or ChartKind.Doughnut)
+            errors.Add("Stacked hanya untuk chart bar, line, atau area.");
+        if (chart.Horizontal && kindOk && chart.Kind != ChartKind.Bar)
+            errors.Add("Horizontal hanya untuk chart bar.");
+        if (chart.Title is { Length: > ModuleChart.MaxTitleLength }) errors.Add($"Judul chart maksimal {ModuleChart.MaxTitleLength} karakter.");
+        if (chart.MaxRows is < 1 or > ModuleChart.HardMaxRows) errors.Add($"MaxRows harus antara 1 dan {ModuleChart.HardMaxRows}.");
+    }
+
+    private static void ValidateWidget(ModuleWidget? widget, List<string> errors)
+    {
+        if (widget is null) { errors.Add("Config widget wajib ada."); return; }
+
+        ValidateField(widget.ValueField, "Kolom nilai widget", errors);
+        ValidateField(widget.LabelField, "Kolom label widget", errors, required: false);
+        if (widget.Label is { Length: > ModuleWidget.MaxLabelLength }) errors.Add($"Label widget maksimal {ModuleWidget.MaxLabelLength} karakter.");
+        if (!Enum.IsDefined(widget.Format)) errors.Add("Format widget tidak dikenal.");
+        if (widget.Decimals is < 0 or > ModuleWidget.MaxDecimals) errors.Add($"Desimal harus antara 0 dan {ModuleWidget.MaxDecimals}.");
+        if (widget.Prefix is { Length: > ModuleWidget.MaxAffixLength }) errors.Add($"Awalan maksimal {ModuleWidget.MaxAffixLength} karakter.");
+        if (widget.Suffix is { Length: > ModuleWidget.MaxAffixLength }) errors.Add($"Akhiran maksimal {ModuleWidget.MaxAffixLength} karakter.");
+        if (!ModuleWidget.Colors.Contains(widget.Color?.Trim() ?? "", StringComparer.OrdinalIgnoreCase))
+            errors.Add($"Warna widget harus salah satu dari: {string.Join(", ", ModuleWidget.Colors)}.");
+        if (widget.RefreshSeconds != 0 && (widget.RefreshSeconds < ModuleWidget.MinRefreshSeconds || widget.RefreshSeconds > ModuleWidget.MaxRefreshSeconds))
+            errors.Add($"Refresh harus 0 (mati) atau {ModuleWidget.MinRefreshSeconds}-{ModuleWidget.MaxRefreshSeconds} detik.");
+    }
+
+    [GeneratedRegex(@"^#[0-9A-Fa-f]{6}$")]
+    private static partial Regex ColorPattern();
 
     /// <summary>A Page module is HTML only (embedded modules are checked against the database by the builder).</summary>
     private static void ValidatePageModule(ModuleConfig config, List<string> errors)

@@ -1,7 +1,7 @@
 namespace Rakit.Core.Modules;
 
 /// <summary>Stored in rakit.Modules.Type as table / form / page.</summary>
-public enum ModuleType { Table, Form, Page }
+public enum ModuleType { Table, Form, Page, Chart, Widget }
 
 public enum ModuleStatus { Draft, Published }
 
@@ -70,6 +70,81 @@ public sealed class ModuleFormField
 
     /// <summary>Select and browse fields only (and required for them).</summary>
     public ModuleLookup? Lookup { get; set; }
+}
+
+/// <summary>
+/// A Widget module: one KPI card read from the first row of its (Query) data source. The label is a fixed text or, when
+/// <see cref="LabelField"/> is set, a column of that row. <see cref="Format"/> uses the same formats as a Table column.
+/// </summary>
+public sealed class ModuleWidget
+{
+    public const int MaxFieldLength = 128;
+    public const int MaxLabelLength = 100;
+    public const int MaxAffixLength = 20;
+    public const int MaxDecimals = 6;
+    public const int MinRefreshSeconds = 10;
+    public const int MaxRefreshSeconds = 3600;
+
+    /// <summary>The Bootstrap colour names a card can use (camelCase / lower-case in JSON).</summary>
+    public static readonly IReadOnlyList<string> Colors = ["primary", "success", "warning", "danger", "info", "secondary", "dark"];
+
+    /// <summary>Result column holding the value; matched case-insensitively.</summary>
+    public string ValueField { get; set; } = "";
+    public string? Label { get; set; }
+    public string? LabelField { get; set; }
+    public ColumnFormat Format { get; set; } = ColumnFormat.Number;
+
+    /// <summary>Decimal places of a number value (0..6).</summary>
+    public int Decimals { get; set; }
+    public string? Prefix { get; set; }
+    public string? Suffix { get; set; }
+    public string Color { get; set; } = "primary";
+
+    /// <summary>0 = never; otherwise 10..3600 seconds between automatic reloads.</summary>
+    public int RefreshSeconds { get; set; }
+}
+
+/// <summary>Serialised camelCase: bar, line, area, pie, doughnut.</summary>
+public enum ChartKind { Bar, Line, Area, Pie, Doughnut }
+
+public sealed class ChartSeries
+{
+    /// <summary>Result column holding this series' numbers; matched case-insensitively.</summary>
+    public string ValueField { get; set; } = "";
+
+    /// <summary>Legend text; blank = the column name.</summary>
+    public string? Label { get; set; }
+
+    /// <summary><c>#RRGGBB</c>; blank = the default palette.</summary>
+    public string? Color { get; set; }
+}
+
+/// <summary>A Chart module: categories from <see cref="LabelField"/>, one or more series of numbers, from a (Query) data source.</summary>
+public sealed class ModuleChart
+{
+    public const int MaxSeries = 8;
+    public const int DefaultMaxRows = 100;
+    public const int HardMaxRows = 1000;
+    public const int MaxTitleLength = 100;
+
+    public ChartKind Kind { get; set; } = ChartKind.Bar;
+
+    /// <summary>Result column holding the category (x axis / slice) names.</summary>
+    public string LabelField { get; set; } = "";
+
+    public List<ChartSeries> Series { get; set; } = [];
+
+    /// <summary>Bar, line and area only.</summary>
+    public bool Stacked { get; set; }
+
+    /// <summary>Bar only: horizontal bars.</summary>
+    public bool Horizontal { get; set; }
+
+    public bool Legend { get; set; } = true;
+    public string? Title { get; set; }
+
+    /// <summary>Rows read from the data source (1..1000).</summary>
+    public int MaxRows { get; set; } = DefaultMaxRows;
 }
 
 /// <summary>Content of a Page module: HTML written in the builder; <c>{{module:GUID}}</c> embeds another module.</summary>
@@ -148,6 +223,12 @@ public sealed class ModuleConfig
 
     /// <summary>Page modules only.</summary>
     public ModulePage? Page { get; set; }
+
+    /// <summary>Widget modules only.</summary>
+    public ModuleWidget? Widget { get; set; }
+
+    /// <summary>Chart modules only.</summary>
+    public ModuleChart? Chart { get; set; }
     public ModuleAccess Access { get; set; } = new();
 }
 

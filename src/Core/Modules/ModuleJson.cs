@@ -22,6 +22,8 @@ public static class ModuleJson
         ModuleType.Table => "table",
         ModuleType.Form => "form",
         ModuleType.Page => "page",
+        ModuleType.Chart => "chart",
+        ModuleType.Widget => "widget",
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };
 
@@ -30,6 +32,8 @@ public static class ModuleJson
         "table" => ModuleType.Table,
         "form" => ModuleType.Form,
         "page" => ModuleType.Page,
+        "chart" => ModuleType.Chart,
+        "widget" => ModuleType.Widget,
         _ => throw new InvalidOperationException($"Unknown module type '{value}'."),
     };
 
