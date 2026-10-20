@@ -25,12 +25,25 @@ public sealed class ModuleFormViewModel
     public string? NewGroupName { get; set; }
 
     public Guid? DataSourceId { get; set; }
+
+    /// <summary>Optional record actions: Detail is a Query data source, the other three are Command data sources.</summary>
+    public Guid? DetailDataSourceId { get; set; }
+    public Guid? InsertDataSourceId { get; set; }
+    public Guid? UpdateDataSourceId { get; set; }
+    public Guid? DeleteDataSourceId { get; set; }
+
     public string ConfigJson { get; set; } = "{}";
 
     // Display only.
     public ModuleStatus Status { get; set; } = ModuleStatus.Draft;
     public IReadOnlyList<ModuleGroup> Groups { get; set; } = [];
     public IReadOnlyList<DataSourceOption> DataSources { get; set; } = [];
+
+    /// <summary>Command data sources, for Insert / Update / Delete.</summary>
+    public IReadOnlyList<DataSourceOption> CommandDataSources { get; set; } = [];
+
+    /// <summary>Rakit:Db:AllowWrite. When off, Command data sources are refused at runtime and the page shows no write buttons.</summary>
+    public bool WriteEnabled { get; set; }
 
     /// <summary>The saved list data source is gone or is no longer a Query data source.</summary>
     public bool DataSourceUnavailable { get; set; }
@@ -41,6 +54,9 @@ public sealed class ModuleFormViewModel
 public sealed class ModuleLoadColumnsRequest
 {
     public Guid DataSourceId { get; set; }
+
+    /// <summary>Optional sample record key (RouteValue <c>id</c>), so a Detail data source returns a row whose values suggest field types.</summary>
+    public string? Key { get; set; }
 }
 
 /// <summary>Body of POST /Builder/Module/Preview: the form's own (unsaved) state.</summary>

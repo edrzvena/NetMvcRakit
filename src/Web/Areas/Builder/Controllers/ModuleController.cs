@@ -2,7 +2,9 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Options;
 using Rakit.Core;
+using Rakit.Core.Config;
 using Rakit.Core.DataSources;
 using Rakit.Core.Modules;
 using Rakit.Core.Schema;
@@ -18,6 +20,7 @@ public class ModuleController(
     IDataSourceRepository dataSources,
     IDataSourceService dataSourceService,
     IModuleRuntimeService runtime,
+    IOptions<RakitDbOptions> dbOptions,
     ILogger<ModuleController> logger) : Controller
 {
     private const string UnavailableView = "~/Areas/Builder/Views/Schema/Unavailable.cshtml";
@@ -41,7 +44,8 @@ public class ModuleController(
         var module = await modules.GetAsync(id, ct);
         if (module is null) return NotFound();
 
-        var problem = await ListSourceProblemAsync(module.Config.Source.List?.DataSourceId, ct);
+        var problem = await ListSourceProblemAsync(module.Config.Source.List?.DataSourceId, ct)
+            ?? (await RecordSourceProblemsAsync(module.Config.Source, ct)).FirstOrDefault();
         if (problem is not null)
         {
             TempData["Error"] = $"Module '{module.Name}' belum bisa dipublikasikan: {problem}";
@@ -146,6 +150,10 @@ public class ModuleController(
         {
             Id = module.Id, Name = module.Name, Description = module.Description, GroupId = module.GroupId,
             DataSourceId = module.Config.Source.List?.DataSourceId, Status = module.Status,
+            DetailDataSourceId = module.Config.Source.Detail?.DataSourceId,
+            InsertDataSourceId = module.Config.Source.Insert?.DataSourceId,
+            UpdateDataSourceId = module.Config.Source.Update?.DataSourceId,
+            DeleteDataSourceId = module.Config.Source.Delete?.DataSourceId,
             ConfigJson = ModuleJson.Serialize(module.Config),
         };
         return View("Form", await WithLookupsAsync(model, ct));
@@ -179,8 +187,11 @@ public class ModuleController(
     [HttpPost, ValidateAntiForgeryToken]
     public Task<IActionResult> LoadColumns([FromBody] ModuleLoadColumnsRequest request, CancellationToken ct) => BuilderJsonAsync(async () =>
     {
+        var context = string.IsNullOrWhiteSpace(request.Key)
+            ? new ParameterContext()
+            : new ParameterContext { Route = new Dictionary<string, string?> { ["id"] = request.Key.Trim() } };
         var result = await dataSourceService.ExecuteForPreviewAsync(
-            request.DataSourceId, new ParameterContext(), new DataSourceRunRequest(0, 1, IncludeTotal: false), ct);
+            request.DataSourceId, context, new DataSourceRunRequest(0, 1, IncludeTotal: false), ct);
         var list = result.List ?? throw new ModuleListUnavailableException(
             "Data source tidak mengembalikan daftar.", "the data source returned no result set at the list position");
 
@@ -202,10 +213,13 @@ public class ModuleController(
         {
             return JsonError(400, "Config tidak dapat dibaca.");
         }
+        // The preview shows the list only: record actions and the half-edited form must not block it.
         config.Source = new ModuleSource
         {
             List = request.DataSourceId is { } d ? new DataSourceRef { DataSourceId = d } : null,
         };
+        config.Form = new ModuleForm();
+        config.Display.KeyField = null;
 
         var input = new ModuleInput
         {
@@ -255,9 +269,14 @@ public class ModuleController(
             return null;
         }
 
+        // Every data source comes from the selects (never from ConfigJson); Display, Form and Access come from ConfigJson.
         config.Source = new ModuleSource
         {
-            List = model.DataSourceId is { } d ? new DataSourceRef { DataSourceId = d } : null,
+            List = Ref(model.DataSourceId),
+            Detail = Ref(model.DetailDataSourceId),
+            Insert = Ref(model.InsertDataSourceId),
+            Update = Ref(model.UpdateDataSourceId),
+            Delete = Ref(model.DeleteDataSourceId),
         };
         var input = new ModuleInput
         {
@@ -278,6 +297,9 @@ public class ModuleController(
             ModelState.AddModelError("", problem);
             return null;
         }
+        var recordProblems = await RecordSourceProblemsAsync(config.Source, ct);
+        foreach (var e in recordProblems) ModelState.AddModelError("", e);
+        if (recordProblems.Count > 0) return null;
 
         if (!string.IsNullOrWhiteSpace(model.NewGroupName))
         {
@@ -300,6 +322,17 @@ public class ModuleController(
         }
 
         return input;
+    }
+
+    private static DataSourceRef? Ref(Guid? id) => id is { } value ? new DataSourceRef { DataSourceId = value } : null;
+
+    /// <summary>What is wrong with the Detail / Insert / Update / Delete data sources: gone, or the wrong statement type.</summary>
+    private async Task<IReadOnlyList<string>> RecordSourceProblemsAsync(ModuleSource source, CancellationToken ct)
+    {
+        if (source.Detail is null && source.Insert is null && source.Update is null && source.Delete is null) return [];
+        var kinds = (await dataSources.ListAsync(ct)).ToDictionary(d => d.Id, d => d.StatementType);
+        return ModuleInputValidator.ValidateRecordSourceKinds(
+            source, id => kinds.TryGetValue(id, out var kind) ? kind : null);
     }
 
     /// <summary>Why the data source cannot be a module's list source (gone, or a Command data source), or null when it is fine.</summary>
@@ -332,11 +365,19 @@ public class ModuleController(
         var allGroups = await groups.ListAsync(ct);
         model.Groups = allGroups.Where(g => g.IsActive || g.Id == model.GroupId).ToList();
 
-        var queryDataSources = (await dataSources.ListAsync(ct)).Where(d => d.StatementType == StatementType.Query).ToList();
+        var allDataSources = await dataSources.ListAsync(ct);
+        var queryDataSources = allDataSources.Where(d => d.StatementType == StatementType.Query).ToList();
         model.DataSources = queryDataSources
             .Select(d => new DataSourceOption(d.Id, d.Code, d.Name, ModuleDisplayText.ModeLabel(d.Mode)))
             .ToList();
         model.DataSourceUnavailable = model.DataSourceId is { } id && queryDataSources.All(d => d.Id != id);
+
+        // A saved record-action id that is gone or has the wrong type is not in these lists; the view keeps it visible so saving reports it.
+        model.CommandDataSources = allDataSources
+            .Where(d => d.StatementType == StatementType.Command)
+            .Select(d => new DataSourceOption(d.Id, d.Code, d.Name, ModuleDisplayText.ModeLabel(d.Mode)))
+            .ToList();
+        model.WriteEnabled = dbOptions.Value.AllowWrite;
 
         if (model.IsEdit && model.Id is { } moduleId)
             model.Status = (await modules.GetAsync(moduleId, ct))?.Status ?? model.Status;

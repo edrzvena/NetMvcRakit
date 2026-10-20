@@ -1,5 +1,6 @@
-// Module form: the Display tab (page size, columns) lives in the browser and is serialised into the hidden ConfigJson
-// field on submit, in the same shape the server stores. The list data source is a normal select (the server takes it from there).
+// Module form: the Display tab (page size, key field, columns) and the Form tab (record fields) live in the browser and are
+// serialised into the hidden ConfigJson field on submit, in the same shape the server stores. Every data source (list and
+// record actions) is a normal select: the server takes them from there.
 (function () {
     'use strict';
 
@@ -17,6 +18,12 @@
     config.display.columns = config.display.columns || [];
     const columns = config.display.columns; // edited in place: [{field, label, visible, sortable, format}]
     columns.forEach((c) => { if (c.visible === undefined) c.visible = true; });
+
+    config.form = config.form || {};
+    config.form.fields = config.form.fields || [];
+    const fields = config.form.fields; // edited in place: [{name, label, type, required, maxLength, regex, default, readonly}]
+    const FIELD_TYPES = [['text', 'Text'], ['textarea', 'Textarea'], ['number', 'Number'], ['date', 'Date'], ['dateTime', 'DateTime'], ['boolean', 'Boolean']];
+    const isTextType = (t) => t === 'text' || t === 'textarea';
 
     let known = null; // Set of lower-case column names last loaded from the data source (null = not loaded)
 
@@ -41,9 +48,16 @@
     // ---- simple fields ----
     $('take').value = config.display.take || 10;
     $('maxTake').value = config.display.maxTake || 100;
+    $('keyField').value = config.display.keyField || '';
 
     // ---- columns editor ----
+    function refreshKeyColumns() {
+        const names = new Set(columns.map((c) => (c.field || '').trim()).filter(Boolean));
+        if (known) known.forEach((n) => names.add(n));
+        $('key-columns').replaceChildren(...[...names].map((n) => el('option', { value: n })));
+    }
     function renderColumns() {
+        refreshKeyColumns();
         const host = $('columns');
         if (columns.length === 0) {
             host.replaceChildren(el('div', { class: 'text-muted small mb-2', text: 'Belum ada kolom: semua kolom hasil akan ditampilkan apa adanya.' }));
@@ -90,6 +104,64 @@
     const isMissing = (c) => known !== null && c.field && !known.has(c.field.toLowerCase());
 
     $('add-column').addEventListener('click', () => { columns.push({ field: '', label: '', visible: true, sortable: false, format: 'text' }); renderColumns(); });
+
+    // ---- form fields editor ----
+    function renderFields() {
+        const host = $('fields');
+        if (fields.length === 0) {
+            host.replaceChildren(el('div', { class: 'text-muted small mb-2', text: 'Belum ada field: aksi Tambah dan Ubah membutuhkan setidaknya satu.' }));
+            return;
+        }
+        const rows = fields.map((f, i) => {
+            const name = el('input', { class: 'form-control form-control-sm', value: f.name || '', placeholder: 'nama (huruf/angka/_)', maxlength: '128' });
+            const label = el('input', { class: 'form-control form-control-sm', value: f.label || '', placeholder: 'label (kosong = nama)' });
+            const type = el('select', { class: 'form-select form-select-sm' });
+            FIELD_TYPES.forEach(([v, t]) => { const o = el('option', { value: v, text: t }); if (v === (f.type || 'text')) o.selected = true; type.appendChild(o); });
+            const required = el('input', { type: 'checkbox', class: 'form-check-input', id: 'req-' + i });
+            const readonly = el('input', { type: 'checkbox', class: 'form-check-input', id: 'ro-' + i });
+            required.checked = !!f.required;
+            readonly.checked = !!f.readonly;
+            const maxLength = el('input', { class: 'form-control form-control-sm', type: 'number', min: '1', max: '4000', placeholder: 'maks panjang' });
+            maxLength.value = f.maxLength || '';
+            const regex = el('input', { class: 'form-control form-control-sm', value: f.regex || '', placeholder: 'regex (seluruh nilai)', maxlength: '500' });
+            const def = el('input', { class: 'form-control form-control-sm', value: f.default || '', placeholder: 'default' });
+
+            const syncType = () => {
+                const text = isTextType(f.type || 'text');
+                maxLength.disabled = !text;
+                regex.disabled = !text;
+            };
+            name.addEventListener('input', () => { f.name = name.value.trim(); });
+            label.addEventListener('input', () => { f.label = label.value; });
+            type.addEventListener('change', () => { f.type = type.value; syncType(); });
+            required.addEventListener('change', () => { f.required = required.checked; });
+            readonly.addEventListener('change', () => { f.readonly = readonly.checked; });
+            maxLength.addEventListener('input', () => { f.maxLength = parseInt(maxLength.value, 10) || null; });
+            regex.addEventListener('input', () => { f.regex = regex.value; });
+            def.addEventListener('input', () => { f.default = def.value; });
+            syncType();
+
+            const move = (d) => () => { const j = i + d; if (j < 0 || j >= fields.length) return; [fields[i], fields[j]] = [fields[j], fields[i]]; renderFields(); };
+            const check = (box, text) => el('div', { class: 'form-check form-check-inline' }, [box, el('label', { class: 'form-check-label small', for: box.id, text: text })]);
+            return el('div', { class: 'border rounded p-2 mb-2' }, [
+                el('div', { class: 'row g-2 mb-1 align-items-center' }, [
+                    el('div', { class: 'col-md-3' }, [name]),
+                    el('div', { class: 'col-md-3' }, [label]),
+                    el('div', { class: 'col-md-2' }, [type]),
+                    el('div', { class: 'col-md-2 text-nowrap' }, [check(required, 'wajib'), check(readonly, 'readonly')]),
+                    el('div', { class: 'col-md-2 text-nowrap text-end' }, [
+                        iconButton('↑', 'Naik', move(-1), i === 0), iconButton('↓', 'Turun', move(1), i === fields.length - 1),
+                        iconButton('×', 'Hapus', () => { fields.splice(i, 1); renderFields(); }),
+                    ]),
+                ]),
+                el('div', { class: 'row g-2 align-items-center' }, [
+                    el('div', { class: 'col-md-2' }, [maxLength]), el('div', { class: 'col-md-6' }, [regex]), el('div', { class: 'col-md-4' }, [def]),
+                ]),
+            ]);
+        });
+        host.replaceChildren(...rows);
+    }
+    $('add-field').addEventListener('click', () => { fields.push({ name: '', label: '', type: 'text', required: false, readonly: false }); renderFields(); });
 
     // ---- helpers shared by "load columns" and "preview" ----
     function token() {
@@ -142,21 +214,58 @@
     });
     $('DataSourceId').addEventListener('change', () => { known = null; renderColumns(); });
 
+    // ---- suggest form fields from the Detail data source ----
+    $('suggest-fields').addEventListener('click', async () => {
+        const status = $('fields-status');
+        const id = $('DetailDataSourceId').value;
+        if (!id) { status.textContent = 'Pilih data source Detail dulu (tab Source).'; return; }
+        status.textContent = 'memuat...';
+        try {
+            const res = await postJson('/Builder/Module/LoadColumns', { dataSourceId: id, key: $('suggest-key').value.trim() || null });
+            if (!res.ok) { status.textContent = ''; $('fields').prepend(errorBox(res, 'Kolom Detail tidak dapat dimuat.')); return; }
+
+            const key = $('keyField').value.trim().toLowerCase();
+            const have = new Set(fields.map((f) => (f.name || '').toLowerCase()));
+            let added = 0;
+            res.data.columns.forEach((c) => {
+                const valid = /^[A-Za-z_][A-Za-z0-9_]*$/.test(c.name);
+                if (!valid || c.name.toLowerCase() === key || have.has(c.name.toLowerCase())) return;
+                fields.push({ name: c.name, label: '', type: c.suggestedFormat || 'text', required: false, readonly: false });
+                added++;
+            });
+            renderFields();
+            status.textContent = added + ' field ditambahkan' + (res.data.hasRows ? '' : ' (tanpa baris contoh: tipe ditebak "text"; isi kunci contoh untuk tebakan yang lebih baik)') + '.';
+        } catch (e) {
+            status.textContent = 'Server tidak dapat dihubungi.';
+        }
+    });
+
     // ---- config (shared by Save and Preview) ----
     function collectConfig() {
         const take = parseInt($('take').value, 10) || 10;
         const maxTake = parseInt($('maxTake').value, 10) || 100;
-        return {
-            display: {
-                take: take, maxTake: maxTake,
-                columns: columns.filter((c) => c.field).map((c) => {
-                    const out = { field: c.field, visible: c.visible !== false, sortable: !!c.sortable, format: c.format || 'text' };
-                    if (c.label && c.label.trim()) out.label = c.label.trim();
-                    return out;
-                }),
-            },
-            access: config.access || { view: ['*'] },
+        const keyField = $('keyField').value.trim();
+        const formFields = fields.filter((f) => f.name).map((f) => {
+            const type = f.type || 'text';
+            const out = { name: f.name, type: type, required: !!f.required, readonly: !!f.readonly };
+            if (f.label && f.label.trim()) out.label = f.label.trim();
+            if (isTextType(type)) {
+                if (f.maxLength) out.maxLength = f.maxLength;
+                if (f.regex) out.regex = f.regex;
+            }
+            if (f.default) out.default = f.default;
+            return out;
+        });
+        const display = {
+            take: take, maxTake: maxTake,
+            columns: columns.filter((c) => c.field).map((c) => {
+                const out = { field: c.field, visible: c.visible !== false, sortable: !!c.sortable, format: c.format || 'text' };
+                if (c.label && c.label.trim()) out.label = c.label.trim();
+                return out;
+            }),
         };
+        if (keyField) display.keyField = keyField;
+        return { display: display, form: { fields: formFields }, access: config.access || { view: ['*'] } };
     }
     form.addEventListener('submit', () => { configInput.value = JSON.stringify(collectConfig()); });
 
@@ -221,4 +330,5 @@
     $('run-preview').addEventListener('click', () => { state.skip = 0; runPreview(); });
 
     renderColumns();
+    renderFields();
 })();

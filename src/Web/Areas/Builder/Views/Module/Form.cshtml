@@ -1,6 +1,27 @@
 @model ModuleFormViewModel
 @{
     ViewData["Title"] = Model.IsEdit ? $"Ubah {Model.Name}" : "Module baru";
+
+    // One select for a record action. A saved id that is not among the options (gone, or the wrong statement type) stays
+    // selected as a marked entry, so it is not dropped silently and saving reports the problem.
+    async Task SourcePick(string field, string title, string help, Guid? selected, IReadOnlyList<DataSourceOption> options)
+    {
+        <div class="col-md-6">
+            <label class="form-label" for="@field">@title</label>
+            <select class="form-select" id="@field" name="@field">
+                <option value="">- tidak ada -</option>
+                @foreach (var d in options)
+                {
+                    <option value="@d.Id" selected="@(selected == d.Id)">@d.Code - @d.Name (@d.ModeLabel)</option>
+                }
+                @if (selected is { } missing && options.All(o => o.Id != missing))
+                {
+                    <option value="@missing" selected>(tidak ditemukan atau bertipe lain) @missing</option>
+                }
+            </select>
+            <div class="form-text">@help</div>
+        </div>
+    }
 }
 
 <p><a asp-area="Builder" asp-controller="Module" asp-action="Index">&larr; Module</a></p>
@@ -31,6 +52,9 @@
         </li>
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="tab-display" data-bs-toggle="tab" data-bs-target="#pane-display" type="button" role="tab" aria-controls="pane-display" aria-selected="false">Display</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-form" data-bs-toggle="tab" data-bs-target="#pane-form" type="button" role="tab" aria-controls="pane-form" aria-selected="false">Form</button>
         </li>
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="tab-preview" data-bs-toggle="tab" data-bs-target="#pane-preview" type="button" role="tab" aria-controls="pane-preview" aria-selected="false">Preview</button>
@@ -89,6 +113,34 @@
                     Parameter yang dibaca dari URL halaman (QueryString) otomatis tersedia untuk mapping data source.
                 </div>
             </div>
+
+            <div class="border rounded p-3 mb-3">
+                <h2 class="h5">Sumber data: Aksi record (opsional)</h2>
+                @if (!Model.WriteEnabled)
+                {
+                    <div class="alert alert-warning" role="note">
+                        Penulisan sedang <strong>dinonaktifkan</strong> (<code>Rakit:Db:AllowWrite = false</code>): data source bertipe Command ditolak,
+                        sehingga tombol Tambah / Ubah / Hapus tidak aktif di halaman runtime. Konfigurasinya tetap bisa disimpan.
+                        Nyalakan flag itu hanya di lingkungan dev; halaman belum punya login.
+                    </div>
+                }
+                <div class="row g-3">
+                    @{
+                        await SourcePick("DetailDataSourceId", "Detail (muat satu record untuk diubah)",
+                            "Data source Query. Kunci record masuk sebagai RouteValue dengan key id.", Model.DetailDataSourceId, Model.DataSources);
+                        await SourcePick("InsertDataSourceId", "Tambah (Insert)",
+                            "Data source Command. Nilai form masuk sebagai FormField (key = nama field di tab Form).", Model.InsertDataSourceId, Model.CommandDataSources);
+                        await SourcePick("UpdateDataSourceId", "Ubah (Update)",
+                            "Data source Command. Nilai form sebagai FormField, kunci record sebagai RouteValue id.", Model.UpdateDataSourceId, Model.CommandDataSources);
+                        await SourcePick("DeleteDataSourceId", "Hapus (Delete)",
+                            "Data source Command. Kunci record sebagai RouteValue id.", Model.DeleteDataSourceId, Model.CommandDataSources);
+                    }
+                </div>
+                <div class="form-text mt-2">
+                    Tombol hanya muncul untuk aksi yang diisi. Prosedur yang mengembalikan nilai selain 0 dianggap gagal dan perubahannya di-rollback (0 = sukses).
+                    Aksi Detail, Ubah, dan Hapus butuh <em>Kolom kunci</em> di tab Display.
+                </div>
+            </div>
         </div>
 
         @* ---------------- Display ---------------- *@
@@ -103,6 +155,12 @@
                     <input class="form-control" type="number" id="maxTake" min="1" max="1000" value="100" />
                     <div class="form-text">Batas yang boleh diminta pengunjung (maks 1000).</div>
                 </div>
+                <div class="col-md-3">
+                    <label class="form-label" for="keyField">Kolom kunci</label>
+                    <input class="form-control" id="keyField" list="key-columns" maxlength="128" placeholder="mis. Id" />
+                    <datalist id="key-columns"></datalist>
+                    <div class="form-text">Kolom list yang berisi kunci record. Wajib bila ada aksi Detail, Ubah, atau Hapus.</div>
+                </div>
             </div>
 
             <div class="border rounded p-3 mb-3">
@@ -116,6 +174,37 @@
                 <div class="form-text">
                     Tanpa kolom, semua kolom hasil ditampilkan apa adanya (tanpa sort). Urutan di sini = urutan di halaman.
                     Sort hanya berlaku untuk kolom yang dicentang <em>sortable</em>. Kolom yang tidak lagi dikembalikan data source tetap tampil kosong.
+                </div>
+            </div>
+        </div>
+
+        @* ---------------- Form ---------------- *@
+        <div class="tab-pane fade" id="pane-form" role="tabpanel" aria-labelledby="tab-form">
+            <div class="border rounded p-3 mb-3">
+                <h2 class="h5">Field form</h2>
+                <p class="small text-muted mb-2">
+                    Dipakai oleh aksi Tambah dan Ubah. Hanya field di sini yang diterima dari pengunjung dan diteruskan ke data source
+                    (lewat mapping FormField dengan key = nama field); kunci lain diabaikan. Field <em>readonly</em> tidak pernah diterima dari klien:
+                    saat Tambah dikirim nilai <em>default</em>-nya, saat Ubah tidak dikirim sama sekali.
+                </p>
+                <div class="row g-2 mb-2 align-items-end">
+                    <div class="col-auto">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="add-field">+ Field</button>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small mb-0" for="suggest-key">Kunci contoh (opsional)</label>
+                        <input class="form-control form-control-sm" id="suggest-key" placeholder="mis. 1" />
+                    </div>
+                    <div class="col-auto">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="suggest-fields">Sarankan field dari Detail</button>
+                    </div>
+                    <div class="col-auto"><span id="fields-status" class="small text-muted" aria-live="polite"></span></div>
+                </div>
+                <div id="fields"></div>
+                <div class="form-text">
+                    Saran field membaca kolom data source Detail (lewat jalur preview, tanpa menyimpan apa pun); dengan kunci contoh, tipe ditebak dari nilainya.
+                    Kolom kunci tidak disarankan. Tanggal ditulis <code>yyyy-MM-dd</code> pada <em>default</em>. MaxLength dan Regex hanya untuk text dan textarea;
+                    Regex harus cocok dengan seluruh nilai.
                 </div>
             </div>
         </div>
