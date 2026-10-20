@@ -1,0 +1,151 @@
+@model ModuleFormViewModel
+@{
+    ViewData["Title"] = Model.IsEdit ? $"Ubah {Model.Name}" : "Module baru";
+}
+
+<p><a asp-area="Builder" asp-controller="Module" asp-action="Index">&larr; Module</a></p>
+<h1 class="h3 mb-3">
+    @(Model.IsEdit ? "Ubah Module" : "Module baru")
+    @if (Model.IsEdit)
+    {
+        <span class="badge fs-6 @(Model.Status == ModuleStatus.Published ? "bg-success" : "bg-secondary")">@ModuleDisplayText.StatusLabel(Model.Status)</span>
+    }
+</h1>
+
+<div asp-validation-summary="All" class="alert alert-danger"></div>
+
+<form id="module-form" method="post" asp-area="Builder" asp-controller="Module" asp-action="@(Model.IsEdit ? "Edit" : "Create")" asp-route-id="@Model.Id">
+    <input type="hidden" id="ConfigJson" name="ConfigJson" value="@Model.ConfigJson" />
+
+    <ul class="nav nav-tabs mb-3" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="tab-source" data-bs-toggle="tab" data-bs-target="#pane-source" type="button" role="tab" aria-controls="pane-source" aria-selected="true">Source</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-display" data-bs-toggle="tab" data-bs-target="#pane-display" type="button" role="tab" aria-controls="pane-display" aria-selected="false">Display</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-preview" data-bs-toggle="tab" data-bs-target="#pane-preview" type="button" role="tab" aria-controls="pane-preview" aria-selected="false">Preview</button>
+        </li>
+    </ul>
+
+    <div class="tab-content">
+        @* ---------------- Source ---------------- *@
+        <div class="tab-pane fade show active" id="pane-source" role="tabpanel" aria-labelledby="tab-source">
+            <div class="row g-3 mb-3">
+                <div class="col-md-6">
+                    <label class="form-label" for="Name">Nama</label>
+                    <input class="form-control" id="Name" name="Name" value="@Model.Name" maxlength="200" required />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" for="Type">Tipe</label>
+                    <input class="form-control" id="Type" value="Table" disabled />
+                    <div class="form-text">Tipe lain menyusul (Form, Select, Browse, ...).</div>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" for="GroupId">Grup</label>
+                    <select class="form-select" id="GroupId" name="GroupId">
+                        <option value="">- tanpa grup -</option>
+                        @foreach (var g in Model.Groups)
+                        {
+                            <option value="@g.Id" selected="@(Model.GroupId == g.Id)">@g.Name@(g.IsActive ? "" : " (nonaktif)")</option>
+                        }
+                    </select>
+                    <input class="form-control form-control-sm mt-1" id="NewGroupName" name="NewGroupName" value="@Model.NewGroupName" maxlength="100" placeholder="atau buat grup baru" />
+                </div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label" for="Description">Deskripsi</label>
+                <textarea class="form-control" id="Description" name="Description" rows="2" maxlength="500">@Model.Description</textarea>
+            </div>
+
+            <div class="border rounded p-3 mb-3">
+                <h2 class="h5">Sumber data: List</h2>
+                @if (Model.DataSourceUnavailable)
+                {
+                    <div class="alert alert-warning">
+                        Data source yang tersimpan sudah tidak ada atau bukan lagi bertipe Query. Pilih data source lain sebelum menyimpan.
+                    </div>
+                }
+                <label class="form-label" for="DataSourceId">Data source</label>
+                <select class="form-select" id="DataSourceId" name="DataSourceId" required>
+                    <option value="">- pilih -</option>
+                    @foreach (var d in Model.DataSources)
+                    {
+                        <option value="@d.Id" selected="@(Model.DataSourceId == d.Id)">@d.Code - @d.Name (@d.ModeLabel)</option>
+                    }
+                </select>
+                <div class="form-text">
+                    Hanya data source bertipe Query yang bisa dipilih. Mode, prosedur, parameter, dan flag diatur di
+                    <a asp-area="Builder" asp-controller="DataSource" asp-action="Index">Data Source</a>.
+                    Parameter yang dibaca dari URL halaman (QueryString) otomatis tersedia untuk mapping data source.
+                </div>
+            </div>
+        </div>
+
+        @* ---------------- Display ---------------- *@
+        <div class="tab-pane fade" id="pane-display" role="tabpanel" aria-labelledby="tab-display">
+            <div class="row g-3 mb-3">
+                <div class="col-md-3">
+                    <label class="form-label" for="take">Baris per halaman</label>
+                    <input class="form-control" type="number" id="take" min="1" max="1000" value="10" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" for="maxTake">Maksimum per halaman</label>
+                    <input class="form-control" type="number" id="maxTake" min="1" max="1000" value="100" />
+                    <div class="form-text">Batas yang boleh diminta pengunjung (maks 1000).</div>
+                </div>
+            </div>
+
+            <div class="border rounded p-3 mb-3">
+                <h2 class="h5">Kolom</h2>
+                <div class="mb-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="load-columns">Muat kolom dari data source</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="add-column">+ Kolom</button>
+                    <span id="columns-status" class="ms-2 small text-muted" aria-live="polite"></span>
+                </div>
+                <div id="columns"></div>
+                <div class="form-text">
+                    Tanpa kolom, semua kolom hasil ditampilkan apa adanya (tanpa sort). Urutan di sini = urutan di halaman.
+                    Sort hanya berlaku untuk kolom yang dicentang <em>sortable</em>. Kolom yang tidak lagi dikembalikan data source tetap tampil kosong.
+                </div>
+            </div>
+        </div>
+
+        @* ---------------- Preview ---------------- *@
+        <div class="tab-pane fade" id="pane-preview" role="tabpanel" aria-labelledby="tab-preview">
+            <div class="border rounded p-3 mb-3">
+                <h2 class="h5">Preview (Draft)</h2>
+                <div class="row g-2 mb-2 align-items-end">
+                    <div class="col-md-5">
+                        <label class="form-label small" for="preview-query">Query string halaman</label>
+                        <input class="form-control form-control-sm" id="preview-query" placeholder="mis. id=2&amp;q=abc" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small" for="preview-search">Cari</label>
+                        <input class="form-control form-control-sm" id="preview-search" />
+                    </div>
+                    <div class="col-auto">
+                        <button type="button" class="btn btn-sm btn-success" id="run-preview">Run Preview</button>
+                    </div>
+                </div>
+                <span id="preview-status" class="small text-muted" aria-live="polite"></span>
+                <div id="preview-result" class="mt-2" aria-live="polite"></div>
+                <div class="form-text">
+                    Memakai isi form yang sedang diisi (tanpa perlu disimpan) dan jalur preview data source: hanya statement Query, maksimal 50 baris,
+                    prosedur dijalankan di dalam transaksi yang di-rollback. Klik judul kolom <em>sortable</em> untuk mencoba sort.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Simpan</button>
+    <a class="btn btn-outline-secondary" asp-area="Builder" asp-controller="Module" asp-action="Index">Batal</a>
+    <span class="text-muted small ms-2">
+        Hak akses (<code>access</code>) disimpan tapi belum ditegakkan: halaman masih terbuka sampai login dibuat.
+    </span>
+</form>
+
+@section Scripts {
+    <script src="~/js/module-form.js" asp-append-version="true"></script>
+}

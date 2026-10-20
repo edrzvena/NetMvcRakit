@@ -9,7 +9,11 @@ namespace Rakit.Core.Modules;
 /// The module's data cannot be produced because of how it is set up (data source gone, switched off by a flag or the
 /// whitelist, misconfigured mapping). The message is generic and safe for end users; the reason is logged.
 /// </summary>
-public sealed class ModuleListUnavailableException(string message, Exception? inner = null) : Exception(message, inner);
+public sealed class ModuleListUnavailableException(string message, string reason, Exception? inner = null) : Exception(message, inner)
+{
+    /// <summary>Why, in plain words. For builder screens and logs only; never show it to end users.</summary>
+    public string Reason { get; } = reason;
+}
 
 /// <summary>The visitor's request does not fit the data source (e.g. ?id=abc for an INT parameter). The message is safe to show.</summary>
 public sealed class ModuleListRequestException(string message, Exception? inner = null) : Exception(message, inner);
@@ -50,6 +54,18 @@ public interface IModuleRuntimeService
     /// <exception cref="SqlExecutionException">The database rejected or timed out the call; <see cref="SqlExecutionException.Kind"/> says whether the message is for end users.</exception>
     Task<ModuleListResult> GetListAsync(
         Guid moduleId, bool allowDraft, ParameterContext context, ModuleListRequest? request = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Builder preview of a module that is not saved (yet): validates <paramref name="input"/>, then runs it like
+    /// <see cref="GetListAsync"/>, except through the data source's preview path (Query only, at most 50 rows,
+    /// stored procedures rolled back). The returned <see cref="ModuleListResult.Module"/> has an empty Id and status Draft.
+    /// </summary>
+    /// <exception cref="ModuleValidationException"/>
+    /// <exception cref="ModuleListUnavailableException"/>
+    /// <exception cref="ModuleListRequestException"/>
+    /// <exception cref="SqlExecutionException"/>
+    Task<ModuleListResult> PreviewListAsync(
+        ModuleInput input, ParameterContext context, ModuleListRequest? request = null, CancellationToken ct = default);
 }
 
 public sealed class ModuleRuntimeService(
@@ -68,10 +84,30 @@ public sealed class ModuleRuntimeService(
     public async Task<ModuleListResult> GetListAsync(
         Guid moduleId, bool allowDraft, ParameterContext context, ModuleListRequest? request = null, CancellationToken ct = default)
     {
+        var module = await GetModuleAsync(moduleId, allowDraft, ct);
+        return await RunListAsync(module, context, request, preview: false, ct);
+    }
+
+    public async Task<ModuleListResult> PreviewListAsync(
+        ModuleInput input, ParameterContext context, ModuleListRequest? request = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        var errors = ModuleInputValidator.Validate(input);
+        if (errors.Count > 0) throw new ModuleValidationException(errors);
+
+        var module = new Module(
+            Guid.Empty, input.Name.Trim(), input.Type, input.Description, ModuleStatus.Draft, input.GroupId, input.Config,
+            DateTime.UtcNow, null);
+        return await RunListAsync(module, context, request, preview: true, ct);
+    }
+
+    /// <param name="preview">Builder preview: Query statements only, at most 50 rows, and a procedure runs in a rolled-back transaction.</param>
+    private async Task<ModuleListResult> RunListAsync(
+        Module module, ParameterContext context, ModuleListRequest? request, bool preview, CancellationToken ct)
+    {
         ArgumentNullException.ThrowIfNull(context);
         request ??= new ModuleListRequest();
 
-        var module = await GetModuleAsync(moduleId, allowDraft, ct);
         var display = module.Config.Display;
         var dataSourceId = module.Config.Source.List?.DataSourceId;
         if (dataSourceId is null || dataSourceId == Guid.Empty)
@@ -86,8 +122,10 @@ public sealed class ModuleRuntimeService(
         DataSourceResult result;
         try
         {
-            result = await dataSources.ExecuteAsync(
-                dataSourceId.Value, context, new DataSourceRunRequest(skip, take, orderBy, search, IncludeTotal: true), ct);
+            var run = new DataSourceRunRequest(skip, take, orderBy, search, IncludeTotal: true);
+            result = preview
+                ? await dataSources.ExecuteForPreviewAsync(dataSourceId.Value, context, run, ct)
+                : await dataSources.ExecuteAsync(dataSourceId.Value, context, run, ct);
         }
         catch (Exception ex) when (ex is DataSourceNotFoundException or DataSourceForbiddenException or ParameterResolutionException
             or TableDefinitionException or SqlTemplateException or SchemaAccessDeniedException or SchemaObjectNotFoundException
@@ -167,6 +205,6 @@ public sealed class ModuleRuntimeService(
     private ModuleListUnavailableException Unavailable(Module module, string reason, Exception? inner)
     {
         logger.LogWarning(inner, "Module {ModuleId} ({ModuleName}) cannot run its list: {Reason}", module.Id, module.Name, reason);
-        return new ModuleListUnavailableException("Data untuk halaman ini tidak tersedia saat ini.", inner);
+        return new ModuleListUnavailableException("Data untuk halaman ini tidak tersedia saat ini.", reason, inner);
     }
 }

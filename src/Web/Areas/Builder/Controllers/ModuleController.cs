@@ -1,0 +1,325 @@
+using System.Text.Json;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Data.SqlClient;
+using Rakit.Core;
+using Rakit.Core.DataSources;
+using Rakit.Core.Modules;
+using Rakit.Core.Schema;
+using Rakit.Core.Sql;
+using Rakit.Web.Areas.Builder.Models;
+
+namespace Rakit.Web.Areas.Builder.Controllers;
+
+[Area("Builder")]
+public class ModuleController(
+    IModuleRepository modules,
+    IModuleGroupRepository groups,
+    IDataSourceRepository dataSources,
+    IDataSourceService dataSourceService,
+    IModuleRuntimeService runtime,
+    ILogger<ModuleController> logger) : Controller
+{
+    private const string UnavailableView = "~/Areas/Builder/Views/Schema/Unavailable.cshtml";
+
+    private string CurrentUser => User.Identity?.Name ?? "anonymous";
+
+    // ---- list ----------------------------------------------------------------------------------
+
+    public Task<IActionResult> Index(CancellationToken ct) => GuardAsync(async () =>
+        View(new ModuleIndexViewModel(await modules.ListAsync(ct: ct), TempData["Message"] as string)));
+
+    // ---- create --------------------------------------------------------------------------------
+
+    [HttpGet]
+    public Task<IActionResult> Create(CancellationToken ct) => GuardAsync(async () =>
+        View("Form", await WithLookupsAsync(new ModuleFormViewModel(), ct)));
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public Task<IActionResult> Create(ModuleFormViewModel model, CancellationToken ct) => GuardAsync(async () =>
+    {
+        var input = await BuildInputAsync(model, ct);
+        if (input is not null)
+        {
+            try
+            {
+                var created = await modules.CreateAsync(input, CurrentUser, ct);
+                TempData["Message"] = $"Module '{created.Name}' dibuat sebagai draft.";
+                return RedirectToAction(nameof(Index));
+            }
+            catch (Exception ex) when (AddModelErrors(ex)) { }
+        }
+        return View("Form", await WithLookupsAsync(model, ct));
+    });
+
+    // ---- edit ----------------------------------------------------------------------------------
+
+    [HttpGet]
+    public Task<IActionResult> Edit(Guid id, CancellationToken ct) => GuardAsync(async () =>
+    {
+        var module = await modules.GetAsync(id, ct);
+        if (module is null) return NotFound();
+        var model = new ModuleFormViewModel
+        {
+            Id = module.Id, Name = module.Name, Description = module.Description, GroupId = module.GroupId,
+            DataSourceId = module.Config.Source.List?.DataSourceId, Status = module.Status,
+            ConfigJson = ModuleJson.Serialize(module.Config),
+        };
+        return View("Form", await WithLookupsAsync(model, ct));
+    });
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public Task<IActionResult> Edit(Guid id, ModuleFormViewModel model, CancellationToken ct) => GuardAsync(async () =>
+    {
+        model.Id = id;
+        var input = await BuildInputAsync(model, ct);
+        if (input is not null)
+        {
+            try
+            {
+                var updated = await modules.UpdateAsync(id, input, CurrentUser, ct);
+                TempData["Message"] = $"Module '{updated.Name}' disimpan.";
+                return RedirectToAction(nameof(Index));
+            }
+            catch (ModuleNotFoundException)
+            {
+                return NotFound();
+            }
+            catch (Exception ex) when (AddModelErrors(ex)) { }
+        }
+        return View("Form", await WithLookupsAsync(model, ct));
+    });
+
+    // ---- helper endpoints for the form (builder screens: reasons are shown in full) --------------
+
+    /// <summary>Columns a data source returns, to fill the Display tab. Runs through the data source preview path (rolled back, max 50 rows).</summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    public Task<IActionResult> LoadColumns([FromBody] ModuleLoadColumnsRequest request, CancellationToken ct) => BuilderJsonAsync(async () =>
+    {
+        var result = await dataSourceService.ExecuteForPreviewAsync(
+            request.DataSourceId, new ParameterContext(), new DataSourceRunRequest(0, 1, IncludeTotal: false), ct);
+        var list = result.List ?? throw new ModuleListUnavailableException(
+            "Data source tidak mengembalikan daftar.", "the data source returned no result set at the list position");
+
+        var first = list.Rows.FirstOrDefault();
+        var columns = list.Columns.Select((name, i) =>
+            new LoadedColumn(name, ModuleDisplayText.SuggestFormat(first is not null && i < first.Count ? first[i] : null)));
+        return Json(new { columns, hasRows = first is not null });
+    });
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public Task<IActionResult> Preview([FromBody] ModulePreviewRequest request, CancellationToken ct) => BuilderJsonAsync(async () =>
+    {
+        ModuleConfig config;
+        try
+        {
+            config = request.Config.ValueKind == JsonValueKind.Object ? ModuleJson.Deserialize(request.Config.GetRawText()) : new ModuleConfig();
+        }
+        catch (JsonException)
+        {
+            return JsonError(400, "Config tidak dapat dibaca.");
+        }
+        config.Source = new ModuleSource
+        {
+            List = request.DataSourceId is { } d ? new DataSourceRef { DataSourceId = d } : null,
+        };
+
+        var input = new ModuleInput
+        {
+            Name = string.IsNullOrWhiteSpace(request.Name) ? "preview" : request.Name.Trim(),
+            Type = ModuleType.Table,
+            Config = config,
+        };
+        var result = await runtime.PreviewListAsync(
+            input, QueryContext(request.Query), new ModuleListRequest(request.Skip, request.Take, request.OrderBy, request.Search), ct);
+
+        return Json(new ModulePreviewResponse(
+            result.Columns.Select(c => new PreviewColumn(c.Field, c.Label, c.Sortable, ModuleDisplayText.FormatName(c.Format))).ToList(),
+            result.Rows.Select(r => (IReadOnlyList<string?>)r.Select(PreviewFormat.Cell).ToList()).ToList(),
+            result.TotalCount, result.Skip, result.Take, result.HasNext, result.OrderBy));
+    });
+
+    // ---- internals -----------------------------------------------------------------------------
+
+    /// <summary>Turns "id=2&amp;q=abc" into the query-string part of a parameter context.</summary>
+    private static ParameterContext QueryContext(string? query)
+    {
+        var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(query))
+            foreach (var (key, value) in QueryHelpers.ParseQuery(query.TrimStart('?')))
+            {
+                var first = value.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
+                if (first is not null) values.TryAdd(key, first);
+            }
+        return new ParameterContext { QueryString = values };
+    }
+
+    /// <summary>
+    /// Validates the posted form and returns the module input, or null with the errors added to ModelState.
+    /// A new group is created last, once everything else is known to be valid.
+    /// </summary>
+    private async Task<ModuleInput?> BuildInputAsync(ModuleFormViewModel model, CancellationToken ct)
+    {
+        ModuleConfig config;
+        try
+        {
+            config = ModuleJson.Deserialize(string.IsNullOrWhiteSpace(model.ConfigJson) ? "{}" : model.ConfigJson);
+        }
+        catch (JsonException)
+        {
+            ModelState.AddModelError("", "Config tidak dapat dibaca. Muat ulang halaman lalu coba lagi.");
+            return null;
+        }
+
+        config.Source = new ModuleSource
+        {
+            List = model.DataSourceId is { } d ? new DataSourceRef { DataSourceId = d } : null,
+        };
+        var input = new ModuleInput
+        {
+            Name = model.Name?.Trim() ?? "",
+            Type = ModuleType.Table,
+            Description = string.IsNullOrWhiteSpace(model.Description) ? null : model.Description.Trim(),
+            GroupId = model.GroupId,
+            Config = config,
+        };
+
+        var errors = ModuleInputValidator.Validate(input);
+        foreach (var e in errors) ModelState.AddModelError("", e);
+        if (errors.Count > 0) return null;
+
+        // The module only stores the data source's id, so this is where a wrong or unsuitable one is caught.
+        var ds = await dataSources.GetAsync(model.DataSourceId!.Value, ct);
+        if (ds is null)
+        {
+            ModelState.AddModelError("", "Data source tidak ditemukan.");
+            return null;
+        }
+        if (ds.StatementType != StatementType.Query)
+        {
+            ModelState.AddModelError("", $"Data source '{ds.Code}' bertipe Command; sumber list harus bertipe Query.");
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(model.NewGroupName))
+        {
+            try
+            {
+                input.GroupId = (await groups.CreateAsync(model.NewGroupName, CurrentUser, ct)).Id;
+            }
+            catch (ModuleGroupValidationException ex)
+            {
+                foreach (var e in ex.Errors) ModelState.AddModelError("", e);
+                return null;
+            }
+            catch (DuplicateModuleGroupNameException)
+            {
+                ModelState.AddModelError("", $"Grup '{model.NewGroupName.Trim()}' sudah ada; pilih dari daftar grup.");
+                return null;
+            }
+            model.GroupId = input.GroupId;
+            model.NewGroupName = null;
+        }
+
+        return input;
+    }
+
+    /// <summary>Exception filter used for its side effect: turns expected failures into form errors.</summary>
+    private bool AddModelErrors(Exception ex)
+    {
+        switch (ex)
+        {
+            case ModuleValidationException v:
+                foreach (var e in v.Errors) ModelState.AddModelError("", e);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private async Task<ModuleFormViewModel> WithLookupsAsync(ModuleFormViewModel model, CancellationToken ct)
+    {
+        var allGroups = await groups.ListAsync(ct);
+        model.Groups = allGroups.Where(g => g.IsActive || g.Id == model.GroupId).ToList();
+
+        var queryDataSources = (await dataSources.ListAsync(ct)).Where(d => d.StatementType == StatementType.Query).ToList();
+        model.DataSources = queryDataSources
+            .Select(d => new DataSourceOption(d.Id, d.Code, d.Name, ModuleDisplayText.ModeLabel(d.Mode)))
+            .ToList();
+        model.DataSourceUnavailable = model.DataSourceId is { } id && queryDataSources.All(d => d.Id != id);
+
+        if (model.IsEdit && model.Id is { } moduleId)
+            model.Status = (await modules.GetAsync(moduleId, ct))?.Status ?? model.Status;
+        return model;
+    }
+
+    private JsonResult JsonError(int status, string message, IReadOnlyList<string>? errors = null, string? detail = null, string? kind = null)
+    {
+        Response.StatusCode = status;
+        return Json(new { message, errors, detail, kind });
+    }
+
+    /// <summary>Maps the failures a builder helper call can have to a status code and a message that explains them.</summary>
+    private async Task<IActionResult> BuilderJsonAsync(Func<Task<IActionResult>> action)
+    {
+        try
+        {
+            return await action();
+        }
+        catch (ModuleValidationException ex)
+        {
+            return JsonError(400, "Module belum valid.", errors: ex.Errors);
+        }
+        catch (DataSourceNotFoundException)
+        {
+            return JsonError(404, "Data source tidak ditemukan.");
+        }
+        catch (DataSourceForbiddenException ex)
+        {
+            return JsonError(403, ex.Message);
+        }
+        catch (ModuleListUnavailableException ex)
+        {
+            return JsonError(422, "Data source tidak dapat dijalankan.", detail: ex.Reason);
+        }
+        catch (ModuleListRequestException ex)
+        {
+            return JsonError(400, ex.Message);
+        }
+        catch (Exception ex) when (ex is ParameterResolutionException or TableDefinitionException or SqlTemplateException or ArgumentException)
+        {
+            return JsonError(400, ExceptionMessages.WithoutParameterSuffix(ex));
+        }
+        catch (Exception ex) when (ex is SchemaAccessDeniedException or SchemaObjectNotFoundException)
+        {
+            return JsonError(400, "Tabel atau prosedur tidak ditemukan atau tidak diizinkan.");
+        }
+        catch (SqlExecutionException ex)
+        {
+            return JsonError(422, ex.Message, detail: ex.Detail, kind: ex.Kind.ToString());
+        }
+        catch (SqlException ex)
+        {
+            logger.LogError(ex, "Module builder helper could not reach the database.");
+            return JsonError(503, "Database tidak tersedia.");
+        }
+    }
+
+    private async Task<IActionResult> GuardAsync(Func<Task<IActionResult>> action)
+    {
+        try
+        {
+            return await action();
+        }
+        catch (ArgumentException)
+        {
+            return NotFound();
+        }
+        catch (SqlException ex)
+        {
+            logger.LogError(ex, "Module screen could not reach the database.");
+            Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            return View(UnavailableView);
+        }
+    }
+}

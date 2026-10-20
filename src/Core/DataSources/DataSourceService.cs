@@ -49,6 +49,22 @@ public interface IDataSourceService
         Guid dataSourceId, ParameterContext context, DataSourceRunRequest? request = null, CancellationToken ct = default);
 
     /// <summary>
+    /// Builder preview of a SAVED data source with the request's paging, sort and search: at most 50 rows per result
+    /// set, statement type Query only, and a stored procedure runs inside a transaction that is rolled back.
+    /// Same flag and whitelist checks as <see cref="ExecuteAsync"/>.
+    /// </summary>
+    /// <exception cref="DataSourceNotFoundException"/>
+    /// <exception cref="DataSourceForbiddenException">Flag, whitelist, or a Command statement.</exception>
+    /// <exception cref="ParameterResolutionException"/>
+    /// <exception cref="TableDefinitionException"/>
+    /// <exception cref="SchemaAccessDeniedException">Stored procedure schema is not in AllowedSchemas.</exception>
+    /// <exception cref="SchemaObjectNotFoundException">Stored procedure no longer exists.</exception>
+    /// <exception cref="ArgumentException">A stored procedure parameter has no value or a value that does not fit.</exception>
+    /// <exception cref="SqlExecutionException"/>
+    Task<DataSourceResult> ExecuteForPreviewAsync(
+        Guid dataSourceId, ParameterContext context, DataSourceRunRequest? request = null, CancellationToken ct = default);
+
+    /// <summary>
     /// Builder preview of an unsaved definition: at most 50 rows, statement type Query only. Parameters take their
     /// values from <paramref name="sampleValues"/> by name (missing = null); no resolver is involved.
     /// A stored procedure runs inside a transaction that is rolled back.
@@ -78,16 +94,27 @@ public sealed class DataSourceService(
     /// <summary>DS-07 parameter names the service fills from the run request; they need no mapping.</summary>
     public static readonly IReadOnlyList<string> PagingParameterNames = ["Skip", "Take", "OrderBy", "Search", "IsCount"];
 
-    public async Task<DataSourceResult> ExecuteAsync(
+    public Task<DataSourceResult> ExecuteAsync(
         Guid dataSourceId, ParameterContext context, DataSourceRunRequest? request = null, CancellationToken ct = default)
+        => RunSavedAsync(dataSourceId, context, request, preview: false, ct);
+
+    public Task<DataSourceResult> ExecuteForPreviewAsync(
+        Guid dataSourceId, ParameterContext context, DataSourceRunRequest? request = null, CancellationToken ct = default)
+        => RunSavedAsync(dataSourceId, context, request, preview: true, ct);
+
+    private async Task<DataSourceResult> RunSavedAsync(
+        Guid dataSourceId, ParameterContext context, DataSourceRunRequest? request, bool preview, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(context);
         var ds = await repository.GetAsync(dataSourceId, ct) ?? throw new DataSourceNotFoundException(dataSourceId);
 
+        if (preview && ds.StatementType != StatementType.Query)
+            throw new DataSourceForbiddenException("Preview hanya tersedia untuk statement Query.");
         await EnsureAllowedAsync(ds.Mode, ds.StatementType, ds.Definition, ct);
+
         var args = resolver.Resolve(ds.Definition.Parameters, context);
         return await RunAsync(ds.Mode, ds.StatementType, ds.Definition, args, request ?? new DataSourceRunRequest(),
-            maxRows: null, rollback: false, ct);
+            maxRows: preview ? PreviewMaxRows : null, rollback: preview, ct);
     }
 
     public async Task<DataSourceResult> PreviewAsync(
