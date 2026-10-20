@@ -43,6 +43,7 @@ public static class DependencyInjection
         services.AddSingleton<IModuleRuntimeService, ModuleRuntimeService>();
         services.AddSingleton<IModuleRecordService, ModuleRecordService>();
         services.AddSingleton<IModuleLookupService, ModuleLookupService>();
+        services.AddSingleton<IModuleVisualService, ModuleVisualService>();
 
         return services;
     }
