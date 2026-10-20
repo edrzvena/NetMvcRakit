@@ -249,7 +249,7 @@ public class ModuleController(
     });
 
     /// <summary>
-    /// Preview of a Widget (later also Chart) module that is not saved: the form's own state, run through the data source's
+    /// Preview of a Widget or Chart module that is not saved: the form's own state, run through the data source's
     /// preview path, answered with the same JSON the runtime page loads so the browser draws it with the same renderer.
     /// </summary>
     [HttpPost, ValidateAntiForgeryToken]
@@ -264,8 +264,8 @@ public class ModuleController(
         {
             return JsonError(400, "Config tidak dapat dibaca.");
         }
-        if (!Enum.TryParse<ModuleType>(request.Type, ignoreCase: true, out var type) || type != ModuleType.Widget)
-            return JsonError(400, "Preview ini hanya untuk module Widget.");
+        if (!Enum.TryParse<ModuleType>(request.Type, ignoreCase: true, out var type) || type is not (ModuleType.Widget or ModuleType.Chart))
+            return JsonError(400, "Preview ini hanya untuk module Widget dan Chart.");
 
         config.Source = new ModuleSource { List = Ref(request.DataSourceId) };
         config.Form = new ModuleForm();
@@ -277,8 +277,10 @@ public class ModuleController(
             Config = config,
         };
 
-        var result = await visual.PreviewWidgetAsync(input, QueryContext(request.Query), ct);
-        return Json(ObjectVisualMapping.ToWidget(result));
+        var context = QueryContext(request.Query);
+        return type == ModuleType.Chart
+            ? Json(ObjectVisualMapping.ToChart(await visual.PreviewChartAsync(input, context, ct)))
+            : Json(ObjectVisualMapping.ToWidget(await visual.PreviewWidgetAsync(input, context, ct)));
     });
 
     /// <summary>

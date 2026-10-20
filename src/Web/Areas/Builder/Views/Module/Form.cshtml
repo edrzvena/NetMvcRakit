@@ -60,13 +60,16 @@
         <li class="nav-item" role="presentation" data-types="table form">
             <button class="nav-link" id="tab-form" data-bs-toggle="tab" data-bs-target="#pane-form" type="button" role="tab" aria-controls="pane-form" aria-selected="false">Form</button>
         </li>
+        <li class="nav-item" role="presentation" data-types="chart">
+            <button class="nav-link" id="tab-chart" data-bs-toggle="tab" data-bs-target="#pane-chart" type="button" role="tab" aria-controls="pane-chart" aria-selected="false">Chart</button>
+        </li>
         <li class="nav-item" role="presentation" data-types="widget">
-            <button class="nav-link" id="tab-widget" data-bs-toggle="tab" data-bs-target="#pane-widget" type="button" role="tab" aria-controls="pane-widget" aria-selected="false">Widget</button>
+            <button class="nav-link" id="tab-widget"data-bs-toggle="tab" data-bs-target="#pane-widget" type="button" role="tab" aria-controls="pane-widget" aria-selected="false">Widget</button>
         </li>
         <li class="nav-item" role="presentation" data-types="table">
             <button class="nav-link" id="tab-preview" data-bs-toggle="tab" data-bs-target="#pane-preview" type="button" role="tab" aria-controls="pane-preview" aria-selected="false">Preview</button>
         </li>
-        <li class="nav-item" role="presentation" data-types="widget">
+        <li class="nav-item" role="presentation" data-types="widget chart">
             <button class="nav-link" id="tab-visual-preview" data-bs-toggle="tab" data-bs-target="#pane-visual-preview" type="button" role="tab" aria-controls="pane-visual-preview" aria-selected="false">Preview</button>
         </li>
     </ul>
@@ -93,6 +96,7 @@
                             <option value="Table" selected="@(Model.Type == ModuleType.Table)">Table (daftar + CRUD)</option>
                             <option value="Form" selected="@(Model.Type == ModuleType.Form)">Form (input berdiri sendiri)</option>
                             <option value="Page" selected="@(Model.Type == ModuleType.Page)">Page / Html (halaman bebas)</option>
+                            <option value="Chart" selected="@(Model.Type == ModuleType.Chart)">Chart (grafik)</option>
                             <option value="Widget" selected="@(Model.Type == ModuleType.Widget)">Widget (kartu angka / KPI)</option>
                         </select>
                         <div class="form-text">Tidak bisa diubah setelah disimpan.</div>
@@ -115,8 +119,8 @@
                 <textarea class="form-control" id="Description" name="Description" rows="2" maxlength="500">@Model.Description</textarea>
             </div>
 
-            <div class="border rounded p-3 mb-3" data-types="table widget">
-                <h2 class="h5" id="list-source-title" data-title-table="Sumber data: List" data-title-widget="Sumber data: Nilai (baris pertama dipakai)">Sumber data: List</h2>
+            <div class="border rounded p-3 mb-3" data-types="table widget chart">
+                <h2 class="h5" id="list-source-title" data-title-table="Sumber data: List" data-title-widget="Sumber data: Nilai (baris pertama dipakai)" data-title-chart="Sumber data: Data grafik">Sumber data: List</h2>
                 @if (Model.DataSourceUnavailable)
                 {
                     <div class="alert alert-warning">
@@ -136,6 +140,7 @@
                     <a asp-area="Builder" asp-controller="DataSource" asp-action="Index">Data Source</a>.
                     Parameter yang dibaca dari URL halaman (QueryString) otomatis tersedia untuk mapping data source.
                     <span data-types="widget">Widget hanya membaca <strong>baris pertama</strong> hasilnya; urutkan atau ringkas di data source.</span>
+                    <span data-types="chart">Grafik menggambar baris hasil sesuai urutannya (sampai <em>Maks baris</em>); urutkan dan ringkas (mis. GROUP BY) di data source.</span>
                 </div>
             </div>
 
@@ -275,6 +280,76 @@
             </div>
         </div>
 
+        @* ---------------- Chart ---------------- *@
+        <div class="tab-pane fade" id="pane-chart" role="tabpanel" aria-labelledby="tab-chart">
+            <div class="border rounded p-3 mb-3">
+                <h2 class="h5">Grafik</h2>
+                <p class="small text-muted">
+                    Setiap baris hasil data source menjadi satu kategori (dari <em>kolom label</em>); setiap <em>seri</em> adalah satu kolom angka.
+                    Baris diambil sesuai urutan hasilnya sampai <em>Maks baris</em>, jadi urutkan dan ringkas di data source.
+                </p>
+                <div class="mb-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="chart-load-columns">Muat kolom dari data source</button>
+                    <span id="chart-columns-status" class="ms-2 small text-muted" aria-live="polite"></span>
+                </div>
+                <datalist id="chart-columns"></datalist>
+                <div class="row g-3 mb-3">
+                    <div class="col-md-3">
+                        <label class="form-label" for="chart-kind">Jenis</label>
+                        <select class="form-select" id="chart-kind">
+                            <option value="bar">Batang (bar)</option>
+                            <option value="line">Garis (line)</option>
+                            <option value="area">Area</option>
+                            <option value="pie">Pie</option>
+                            <option value="doughnut">Doughnut</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label" for="chart-labelField">Kolom label (kategori)</label>
+                        <input class="form-control" id="chart-labelField" list="chart-columns" maxlength="@ModuleWidget.MaxFieldLength" placeholder="mis. Bulan" autocomplete="off" />
+                        <div class="form-text text-warning d-none" id="chart-labelField-warn">Kolom ini tidak ada di hasil data source.</div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label" for="chart-title">Judul</label>
+                        <input class="form-control" id="chart-title" maxlength="@ModuleChart.MaxTitleLength" placeholder="opsional" />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label" for="chart-maxRows">Maks baris</label>
+                        <input class="form-control" type="number" id="chart-maxRows" min="1" max="@ModuleChart.HardMaxRows" value="@ModuleChart.DefaultMaxRows" />
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox" id="chart-stacked" />
+                        <label class="form-check-label" for="chart-stacked">Bertumpuk (stacked)</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox" id="chart-horizontal" />
+                        <label class="form-check-label" for="chart-horizontal">Horizontal (batang)</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox" id="chart-legend" checked />
+                        <label class="form-check-label" for="chart-legend">Legenda</label>
+                    </div>
+                    <div class="form-text">
+                        Bertumpuk untuk batang, garis, dan area; horizontal hanya untuk batang. Legenda hanya tampil bila ada dua seri atau lebih, atau untuk pie / doughnut
+                        (satu seri dijelaskan oleh judul).
+                    </div>
+                </div>
+
+                <h3 class="h6">Seri (maksimal @ModuleChart.MaxSeries)</h3>
+                <div id="chart-series"></div>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="chart-add-series">+ Seri</button>
+                <div class="form-text mt-2" id="chart-series-hint">
+                    Tanpa warna sendiri, seri memakai palet bawaan sesuai urutannya (biru, oranye, hijau toska, kuning, ...). Kolom seri harus berisi angka.
+                </div>
+                <div class="form-text d-none" id="chart-round-hint">
+                    Pie dan doughnut memakai <strong>tepat satu seri</strong>; irisannya selalu berwarna palet bawaan (warna seri diabaikan) dan irisan setelah yang ketujuh
+                    digabung menjadi "Lainnya".
+                </div>
+            </div>
+        </div>
+
         @* ---------------- Widget ---------------- *@
         <div class="tab-pane fade" id="pane-widget" role="tabpanel" aria-labelledby="tab-widget">
             <div class="border rounded p-3 mb-3">
@@ -358,11 +433,12 @@
                     </div>
                 </div>
                 <span id="visual-preview-status" class="small text-muted" aria-live="polite"></span>
-                <div id="visual-preview-host" class="mt-2 col-sm-8 col-md-5 col-lg-4" aria-live="polite"></div>
+                <div id="visual-preview-host" class="mt-2" aria-live="polite"></div>
                 <div class="form-text mt-2">
-                    Memakai isi form yang sedang diisi (tanpa perlu disimpan) dan jalur preview data source: hanya statement Query,
-                    prosedur dijalankan di dalam transaksi yang di-rollback. Kartu digambar dengan renderer yang sama dengan halaman runtime;
-                    muat ulang otomatis tidak berjalan di preview.
+                    Memakai isi form yang sedang diisi (tanpa perlu disimpan) dan jalur preview data source: hanya statement Query, maksimal 50 baris,
+                    prosedur dijalankan di dalam transaksi yang di-rollback. Digambar dengan renderer yang sama dengan halaman runtime.
+                    <span data-types="widget">Muat ulang otomatis tidak berjalan di preview.</span>
+                    <span data-types="chart">Kolom seri yang bukan angka dilaporkan sebagai error di sini, sedangkan di halaman runtime nilainya menjadi celah.</span>
                 </div>
             </div>
         </div>
@@ -402,6 +478,7 @@
 </form>
 
 @section Scripts {
+    <script src="~/lib/chart.js/chart.umd.min.js"></script>
     <script src="~/js/chart-render.js" asp-append-version="true"></script>
     <script src="~/js/module-form.js" asp-append-version="true"></script>
 }

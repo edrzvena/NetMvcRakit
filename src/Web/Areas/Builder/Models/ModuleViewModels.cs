@@ -96,7 +96,7 @@ public sealed class VisualPreviewRequest
 {
     public string? Name { get; set; }
 
-    /// <summary><c>widget</c> (or <c>chart</c>, case-insensitive).</summary>
+    /// <summary><c>widget</c> or <c>chart</c> (case-insensitive).</summary>
     public string? Type { get; set; }
     public Guid? DataSourceId { get; set; }
 

@@ -137,9 +137,11 @@
 
         const showLegend = !!data.legend && (round || data.series.length > 1);
         // The value axis carries the (recessive) grid and the numbers; the category axis only its labels.
+        // Whole numbers only get whole-number ticks (no "3,5" on a count).
+        const wholeNumbers = data.series.every((s) => s.data.every((v) => v == null || Number.isInteger(v)));
         const valueAxis = {
             beginAtZero: true, stacked: stacked, grid: { color: GRID }, border: { display: false },
-            ticks: { color: INK_SECONDARY, callback: (v) => number.format(v) },
+            ticks: { color: INK_SECONDARY, callback: (v) => number.format(v), precision: wholeNumbers ? 0 : undefined },
         };
         const categoryAxis = {
             stacked: stacked, grid: { display: false }, border: { display: false }, ticks: { color: INK_SECONDARY },
@@ -190,5 +192,5 @@
         host.appendChild(details);
     }
 
-    window.RakitVisual = { renderChart: renderChart, renderWidget: renderWidget };
+    window.RakitVisual = { renderChart: renderChart, renderWidget: renderWidget, palette: PALETTE.slice() };
 })();

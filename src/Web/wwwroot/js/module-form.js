@@ -1,4 +1,4 @@
-// Module form: the Display tab (page size, key field, columns), the Form tab (record fields) and the Widget tab live in the
+// Module form: the Display tab (page size, key field, columns), the Form tab (record fields) and the Widget and Chart tabs live in the
 // browser and are serialised into the hidden ConfigJson field on submit, in the same shape the server stores. Every data source
 // (list and record actions) is a normal select: the server takes them from there.
 (function () {
@@ -29,6 +29,11 @@
 
     config.widget = config.widget || {};
     const widget = config.widget; // Widget module settings, read back from the inputs by collectWidget()
+
+    config.chart = config.chart || {};
+    const chart = config.chart; // Chart module settings; the series list is edited in place, the rest is read by collectChart()
+    chart.series = chart.series || [];
+    const chartSeries = chart.series; // [{valueField, label, color}] (color unset = the default palette)
 
     let known = null; // Set of lower-case column names last loaded from the data source (null = not loaded)
 
@@ -118,11 +123,13 @@
         document.querySelectorAll('[data-types]').forEach((node) => {
             node.classList.toggle('d-none', !node.dataset.types.toLowerCase().split(/\s+/).includes(type));
         });
-        $('DataSourceId').required = type === 'table' || type === 'widget'; // a hidden required select would block the submit
+        $('DataSourceId').required = type === 'table' || type === 'widget' || type === 'chart'; // a hidden required select would block the submit
         const title = $('record-sources-title');
         if (title) title.textContent = type === 'form' ? title.dataset.titleForm : title.dataset.titleTable;
         const listTitle = $('list-source-title');
-        if (listTitle) listTitle.textContent = type === 'widget' ? listTitle.dataset.titleWidget : listTitle.dataset.titleTable;
+        if (listTitle) listTitle.textContent = listTitle.dataset['title' + type.charAt(0).toUpperCase() + type.slice(1)] || listTitle.dataset.titleTable;
+        // the preview tab is shared by Widget and Chart: a card is narrow, a chart takes the whole width
+        $('visual-preview-host').className = 'mt-2' + (type === 'widget' ? ' col-sm-8 col-md-5 col-lg-4' : '');
         const active = document.querySelector('.nav-tabs .nav-link.active');
         if (active && active.closest('li').classList.contains('d-none')) $('tab-source').click(); // never stay on a tab that just disappeared
     }
@@ -321,8 +328,28 @@
         known = null;
         renderColumns();
         $('widget-columns').replaceChildren();
+        $('chart-columns').replaceChildren();
         refreshWidgetWarnings();
+        refreshChartWarnings();
     });
+
+    // Loads the columns of the chosen data source into <datalist> `list` and remembers them in `known`; null when it failed.
+    async function fetchColumns(status, list) {
+        const id = dataSourceId();
+        if (!id) { status.textContent = 'Pilih data source dulu (tab Source).'; return null; }
+        status.textContent = 'memuat...';
+        try {
+            const res = await postJson('/Builder/Module/LoadColumns', { dataSourceId: id });
+            if (!res.ok) { status.replaceChildren(errorBox(res, 'Kolom tidak dapat dimuat.')); return null; }
+            known = new Set(res.data.columns.map((c) => c.name.toLowerCase()));
+            list.replaceChildren(...res.data.columns.map((c) => el('option', { value: c.name })));
+            return res.data;
+        } catch (e) {
+            status.textContent = 'Server tidak dapat dihubungi.';
+            return null;
+        }
+    }
+    const loadedNote = (data) => data.columns.length + ' kolom dimuat' + (data.hasRows ? '' : ' (data source tidak mengembalikan baris: format ditebak "text")') + '.';
 
     // ---- Widget tab ----
     const widgetInput = (name) => $('widget-' + name);
@@ -348,26 +375,16 @@
 
     $('widget-load-columns').addEventListener('click', async () => {
         const status = $('widget-columns-status');
-        const id = dataSourceId();
-        if (!id) { status.textContent = 'Pilih data source dulu (tab Source).'; return; }
-        status.textContent = 'memuat...';
-        try {
-            const res = await postJson('/Builder/Module/LoadColumns', { dataSourceId: id });
-            if (!res.ok) { status.replaceChildren(errorBox(res, 'Kolom tidak dapat dimuat.')); return; }
-
-            known = new Set(res.data.columns.map((c) => c.name.toLowerCase()));
-            $('widget-columns').replaceChildren(...res.data.columns.map((c) => el('option', { value: c.name })));
-            // Nothing chosen yet: the first number column (else the first column) becomes the value, and its type the format.
-            if (!widgetInput('valueField').value.trim() && res.data.columns.length > 0) {
-                const pick = res.data.columns.find((c) => c.suggestedFormat === 'number') || res.data.columns[0];
-                widgetInput('valueField').value = pick.name;
-                widgetInput('format').value = pick.suggestedFormat || 'text';
-            }
-            refreshWidgetWarnings();
-            status.textContent = res.data.columns.length + ' kolom dimuat' + (res.data.hasRows ? '' : ' (data source tidak mengembalikan baris: format ditebak "text")') + '.';
-        } catch (e) {
-            status.textContent = 'Server tidak dapat dihubungi.';
+        const data = await fetchColumns(status, $('widget-columns'));
+        if (!data) return;
+        // Nothing chosen yet: the first number column (else the first column) becomes the value, and its type the format.
+        if (!widgetInput('valueField').value.trim() && data.columns.length > 0) {
+            const pick = data.columns.find((c) => c.suggestedFormat === 'number') || data.columns[0];
+            widgetInput('valueField').value = pick.name;
+            widgetInput('format').value = pick.suggestedFormat || 'text';
         }
+        refreshWidgetWarnings();
+        status.textContent = loadedNote(data);
     });
 
     function collectWidget() {
@@ -387,6 +404,119 @@
         const suffix = widgetInput('suffix').value;
         if (prefix) out.prefix = prefix;
         if (suffix) out.suffix = suffix;
+        return out;
+    }
+
+    // ---- Chart tab ----
+    const chartInput = (name) => $('chart-' + name);
+    const isRound = () => chartInput('kind').value === 'pie' || chartInput('kind').value === 'doughnut';
+    const MAX_SERIES = 8;
+    const PALETTE = (window.RakitVisual && window.RakitVisual.palette) || [];
+    chartInput('kind').value = chart.kind || 'bar';
+    chartInput('labelField').value = chart.labelField || '';
+    chartInput('title').value = chart.title || '';
+    chartInput('maxRows').value = chart.maxRows || 100;
+    chartInput('stacked').checked = !!chart.stacked;
+    chartInput('horizontal').checked = !!chart.horizontal;
+    chartInput('legend').checked = chart.legend !== false;
+
+    function refreshChartWarnings() {
+        const missing = (value) => known !== null && value && !known.has(value.trim().toLowerCase());
+        $('chart-labelField-warn').classList.toggle('d-none', !missing(chartInput('labelField').value));
+        document.querySelectorAll('#chart-series [data-series-warn]').forEach((node) => {
+            const s = chartSeries[Number(node.dataset.seriesWarn)];
+            node.classList.toggle('d-none', !(s && missing(s.valueField || '')));
+        });
+    }
+    chartInput('labelField').addEventListener('input', refreshChartWarnings);
+
+    // Which options make sense depends on the kind: a pie takes one series and neither stacking nor horizontal bars.
+    function syncChartKind() {
+        const kind = chartInput('kind').value;
+        const round = isRound();
+        chartInput('stacked').disabled = round;
+        chartInput('horizontal').disabled = kind !== 'bar';
+        if (round) chartInput('stacked').checked = false;
+        if (kind !== 'bar') chartInput('horizontal').checked = false;
+        $('chart-round-hint').classList.toggle('d-none', !round);
+        $('chart-round-hint').classList.toggle('text-danger', round && chartSeries.length > 1);
+        $('chart-add-series').disabled = chartSeries.length >= (round ? 1 : MAX_SERIES);
+    }
+    chartInput('kind').addEventListener('change', syncChartKind);
+
+    function renderChartSeries() {
+        const host = $('chart-series');
+        if (chartSeries.length === 0) {
+            host.replaceChildren(el('div', { class: 'text-muted small mb-2', text: 'Belum ada seri: tambahkan setidaknya satu (atau "Muat kolom").' }));
+            syncChartKind();
+            return;
+        }
+        const rows = chartSeries.map((s, i) => {
+            const field = el('input', { class: 'form-control form-control-sm', value: s.valueField || '', list: 'chart-columns', maxlength: '128', placeholder: 'kolom angka', autocomplete: 'off', 'aria-label': 'Kolom seri ' + (i + 1) });
+            const label = el('input', { class: 'form-control form-control-sm', value: s.label || '', maxlength: '100', placeholder: 'label legenda (kosong = nama kolom)', 'aria-label': 'Label seri ' + (i + 1) });
+            const own = el('input', { type: 'checkbox', class: 'form-check-input', id: 'series-own-' + i });
+            own.checked = !!s.color;
+            const color = el('input', { type: 'color', class: 'form-control form-control-color form-control-sm', 'aria-label': 'Warna seri ' + (i + 1) });
+            color.value = s.color || PALETTE[i % Math.max(PALETTE.length, 1)] || '#2a78d6';
+            color.disabled = !own.checked;
+            const warn = el('div', { class: 'col-12 small text-warning d-none', 'data-series-warn': String(i), text: 'Kolom ini tidak ada di hasil data source.' });
+
+            field.addEventListener('input', () => { s.valueField = field.value.trim(); refreshChartWarnings(); });
+            label.addEventListener('input', () => { s.label = label.value; });
+            own.addEventListener('change', () => { color.disabled = !own.checked; s.color = own.checked ? color.value : ''; });
+            color.addEventListener('input', () => { s.color = color.value; });
+            const move = (d) => () => { const j = i + d; if (j < 0 || j >= chartSeries.length) return; [chartSeries[i], chartSeries[j]] = [chartSeries[j], chartSeries[i]]; renderChartSeries(); };
+            return el('div', { class: 'row g-2 mb-2 align-items-center' }, [
+                el('div', { class: 'col-md-3' }, [field]),
+                el('div', { class: 'col-md-4' }, [label]),
+                el('div', { class: 'col-md-3 d-flex align-items-center gap-2' }, [
+                    el('div', { class: 'form-check mb-0' }, [own, el('label', { class: 'form-check-label small', for: 'series-own-' + i, text: 'warna sendiri' })]), color,
+                ]),
+                el('div', { class: 'col-md-2 text-nowrap text-end' }, [
+                    iconButton('↑', 'Naik', move(-1), i === 0), iconButton('↓', 'Turun', move(1), i === chartSeries.length - 1),
+                    iconButton('×', 'Hapus', () => { chartSeries.splice(i, 1); renderChartSeries(); }),
+                ]),
+                warn,
+            ]);
+        });
+        host.replaceChildren(...rows);
+        refreshChartWarnings();
+        syncChartKind();
+    }
+    $('chart-add-series').addEventListener('click', () => { chartSeries.push({ valueField: '', label: '', color: '' }); renderChartSeries(); });
+
+    $('chart-load-columns').addEventListener('click', async () => {
+        const status = $('chart-columns-status');
+        const data = await fetchColumns(status, $('chart-columns'));
+        if (!data) return;
+        // Nothing chosen yet: the first non-number column labels the categories, the first number column becomes a series.
+        const first = data.columns.find((c) => c.suggestedFormat !== 'number') || data.columns[0];
+        if (!chartInput('labelField').value.trim() && first) chartInput('labelField').value = first.name;
+        const label = chartInput('labelField').value.trim().toLowerCase();
+        const number = data.columns.find((c) => c.suggestedFormat === 'number' && c.name.toLowerCase() !== label);
+        if (chartSeries.length === 0 && number) { chartSeries.push({ valueField: number.name, label: '', color: '' }); renderChartSeries(); }
+        refreshChartWarnings();
+        status.textContent = loadedNote(data);
+    });
+
+    function collectChart() {
+        const round = isRound();
+        const out = {
+            kind: chartInput('kind').value,
+            labelField: chartInput('labelField').value.trim(),
+            series: chartSeries.filter((s) => (s.valueField || '').trim()).map((s) => {
+                const item = { valueField: s.valueField.trim() };
+                if ((s.label || '').trim()) item.label = s.label.trim();
+                if (s.color) item.color = s.color;
+                return item;
+            }),
+            stacked: !round && chartInput('stacked').checked,
+            horizontal: chartInput('kind').value === 'bar' && chartInput('horizontal').checked,
+            legend: chartInput('legend').checked,
+            maxRows: parseInt(chartInput('maxRows').value, 10) || 100,
+        };
+        const title = chartInput('title').value.trim();
+        if (title) out.title = title;
         return out;
     }
 
@@ -420,6 +550,7 @@
     function collectConfig() {
         // A Widget has only its own settings (the server ignores Display and Form for it anyway).
         if (currentType() === 'widget') return { widget: collectWidget(), access: config.access || { view: ['*'] } };
+        if (currentType() === 'chart') return { chart: collectChart(), access: config.access || { view: ['*'] } };
 
         const take = parseInt($('take').value, 10) || 10;
         const maxTake = parseInt($('maxTake').value, 10) || 100;
@@ -512,7 +643,7 @@
     }
     $('run-preview').addEventListener('click', () => { state.skip = 0; runPreview(); });
 
-    // ---- Widget preview: the server answers with the same JSON as the runtime page, drawn by the same renderer ----
+    // ---- Widget / Chart preview: the server answers with the same JSON as the runtime page, drawn by the same renderer ----
     $('visual-preview-run').addEventListener('click', async () => {
         const button = $('visual-preview-run');
         const status = $('visual-preview-status');
@@ -524,7 +655,10 @@
                 name: $('Name').value, type: currentType(), dataSourceId: dataSourceId(),
                 config: collectConfig(), query: $('visual-preview-query').value,
             });
-            if (res.ok && res.data) {
+            if (res.ok && res.data && currentType() === 'chart') {
+                window.RakitVisual.renderChart(host, res.data);
+                status.textContent = '';
+            } else if (res.ok && res.data) {
                 window.RakitVisual.renderWidget(host, res.data);
                 const seconds = Number(res.data.refreshSeconds);
                 status.textContent = seconds ? 'Di halaman runtime kartu dimuat ulang tiap ' + seconds + ' detik.' : '';
@@ -542,5 +676,6 @@
 
     renderColumns();
     renderFields();
+    renderChartSeries();
     applyType();
 })();
