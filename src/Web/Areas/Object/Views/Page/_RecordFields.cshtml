@@ -1,0 +1,67 @@
+@using Rakit.Core.Modules
+@model IReadOnlyList<ModuleFormField>
+@* The inputs of a record form, one group per configured field. Shared by the Table add/edit modal (and later the Form module page).
+   The script finds them by data-field: `data-default` is the initial value, `data-lookup` marks a select / browse field. *@
+@foreach (var field in Model)
+{
+    var name = field.Name.Trim();
+    var id = "rf-" + name;
+    var label = string.IsNullOrWhiteSpace(field.Label) ? name : field.Label.Trim();
+    <div class="mb-3" data-group>
+        @if (field.Type == FormFieldType.Boolean)
+        {
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="@id" name="@name" value="true" data-field="@name"
+                       data-default="@field.Default" disabled="@field.Readonly" />
+                <label class="form-check-label" for="@id">@label</label>
+                <div class="invalid-feedback"></div>
+            </div>
+        }
+        else
+        {
+            <label class="form-label" for="@id">@(label + (field.Required && !field.Readonly ? " *" : ""))</label>
+            @if (field.Type == FormFieldType.Textarea)
+            {
+                <textarea class="form-control" id="@id" name="@name" rows="3" data-field="@name" data-default="@field.Default"
+                          maxlength="@field.MaxLength" disabled="@field.Readonly"></textarea>
+                <div class="invalid-feedback"></div>
+            }
+            else if (field.Type == FormFieldType.Select)
+            {
+                @* Options are loaded from the lookup endpoint each time the form opens. *@
+                <select class="form-select" id="@id" name="@name" data-field="@name" data-default="@field.Default" data-lookup="select"
+                        disabled="@field.Readonly">
+                    <option value="">- pilih -</option>
+                </select>
+                <div class="invalid-feedback"></div>
+                <div class="form-text d-none" data-lookup-note></div>
+            }
+            else if (field.Type == FormFieldType.Browse)
+            {
+                @* The input holds the value that is sent; the picked text is only shown beneath it. *@
+                <div class="input-group has-validation">
+                    <input class="form-control" type="text" id="@id" name="@name" data-field="@name" data-default="@field.Default" data-lookup="browse"
+                           readonly disabled="@field.Readonly" autocomplete="off" />
+                    <button type="button" class="btn btn-outline-secondary" data-lookup-pick disabled="@field.Readonly">Cari</button>
+                    <button type="button" class="btn btn-outline-secondary" data-lookup-clear title="Kosongkan" aria-label="Kosongkan" disabled="@field.Readonly">&times;</button>
+                    <div class="invalid-feedback"></div>
+                </div>
+                <div class="form-text" data-lookup-text></div>
+            }
+            else
+            {
+                var inputType = field.Type switch
+                {
+                    FormFieldType.Number => "number",
+                    FormFieldType.Date => "date",
+                    FormFieldType.DateTime => "datetime-local",
+                    _ => "text",
+                };
+                <input class="form-control" type="@inputType" id="@id" name="@name" data-field="@name" data-default="@field.Default"
+                       step="@(field.Type == FormFieldType.Number ? "any" : null)" maxlength="@field.MaxLength"
+                       disabled="@field.Readonly" autocomplete="off" />
+                <div class="invalid-feedback"></div>
+            }
+        }
+    </div>
+}

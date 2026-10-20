@@ -15,6 +15,7 @@
     const defaultTake = parseInt(root.dataset.take, 10) || 10;
     const maxTake = parseInt(root.dataset.maxTake, 10) || 100;
     const recordUrl = root.dataset.recordUrl;
+    const lookupUrl = (field) => (root.dataset.lookupUrl || '').replace('__FIELD__', encodeURIComponent(field));
     const CONTROL = ['_skip', '_take', '_order', '_q'];
 
     // ---- state, read from / written to the URL ----
@@ -242,24 +243,61 @@
         box.classList.remove('d-none');
         if (first) first.focus();
     }
+    // A select's options come from the lookup. A stored value that is not among them (stale, or the list was cut short) is kept
+    // as an extra, marked option so that saving does not silently change it.
+    function setValue(i, v) {
+        const value = v == null ? '' : String(v);
+        if (i.dataset.lookup === 'select' && value !== '' && ![...i.options].some((o) => o.value === value)) {
+            i.appendChild(el('option', { value: value, text: value + ' (tidak ada di daftar)' }));
+        }
+        i.value = value;
+        const caption = i.closest('[data-group]').querySelector('[data-lookup-text]');
+        if (caption) caption.textContent = ''; // the text of a browse value is only known after picking
+    }
     function resetForm() {
         inputs().forEach((i) => {
             const d = i.dataset.default || '';
             if (i.type === 'checkbox') i.checked = d.toLowerCase() === 'true';
-            else i.value = d;
+            else setValue(i, d);
         });
     }
     function fillForm(values) {
         inputs().forEach((i) => {
             const v = values[i.dataset.field];
             if (i.type === 'checkbox') i.checked = String(v).toLowerCase() === 'true';
-            else i.value = v == null ? '' : v;
+            else setValue(i, v);
         });
+    }
+
+    // -- lookups: select options (loaded every time the form opens) and the browse picker
+    async function fetchLookup(field, params) {
+        const q = new URLSearchParams(params);
+        const res = await send('GET', lookupUrl(field) + (q.toString() ? '?' + q : ''));
+        return res;
+    }
+    async function loadSelects() {
+        await Promise.all(inputs().filter((i) => i.dataset.lookup === 'select').map(async (select) => {
+            const note = select.closest('[data-group]').querySelector('[data-lookup-note]');
+            note.classList.add('d-none');
+            const res = await fetchLookup(select.dataset.field, {});
+            select.replaceChildren(el('option', { value: '', text: '- pilih -' }));
+            if (!res.ok) {
+                note.textContent = 'Pilihan tidak dapat dimuat: ' + failureText(res);
+                note.classList.remove('d-none');
+                return;
+            }
+            res.data.items.forEach((item) => select.appendChild(el('option', { value: item.value, text: item.text })));
+            if (res.data.hasNext) {
+                note.textContent = 'Daftar pilihan dipotong (' + res.data.items.length + (res.data.total != null ? ' dari ' + res.data.total : '') + '). Gunakan tipe browse untuk daftar yang panjang.';
+                note.classList.remove('d-none');
+            }
+        }));
     }
 
     async function openAdd() {
         clearMessage();
         clearErrors();
+        await loadSelects();
         resetForm();
         editingKey = null;
         $('record-title').textContent = 'Tambah data';
@@ -270,6 +308,7 @@
         const res = await send('GET', keyUrl(key));
         if (!res.ok) { showMessage(failureText(res), false); return; }
         clearErrors();
+        await loadSelects();
         fillForm(res.data.values || {});
         editingKey = key;
         $('record-title').textContent = 'Ubah data';
@@ -295,6 +334,91 @@
                 load();
             } else {
                 showFormErrors(res);
+            }
+        });
+    }
+
+    // -- browse picker: the add/edit modal hides while it is open and comes back when it closes (Bootstrap does not stack modals)
+    const picker = { input: null, field: '', skip: 0, q: '', open: false, returning: false };
+    if ($('lookup-modal')) {
+        const lookupStatus = (text) => { $('lookup-status').textContent = text; };
+
+        async function loadPicker() {
+            lookupStatus('Memuat...');
+            $('lookup-alert').classList.add('d-none');
+            const res = await fetchLookup(picker.field, { _q: picker.q, _skip: String(picker.skip) });
+            lookupStatus('');
+            if (!res.ok) {
+                $('lookup-list').replaceChildren();
+                $('lookup-alert').textContent = failureText(res);
+                $('lookup-alert').classList.remove('d-none');
+                $('lookup-prev').disabled = true;
+                $('lookup-next').disabled = true;
+                return;
+            }
+            const data = res.data;
+            $('lookup-list').replaceChildren(...(data.items.length === 0
+                ? [el('div', { class: 'list-group-item text-muted', text: 'Tidak ada data.' })]
+                : data.items.map((item) => el('button', {
+                    type: 'button', class: 'list-group-item list-group-item-action d-flex justify-content-between gap-3',
+                    onclick: () => choose(item),
+                }, [el('span', { text: item.text }), el('span', { class: 'text-muted small', text: item.value })]))));
+            const first = data.items.length === 0 ? 0 : data.skip + 1;
+            $('lookup-info').textContent = data.items.length === 0 ? '' : first + '-' + (data.skip + data.items.length) + (data.total != null ? ' dari ' + data.total : '');
+            $('lookup-prev').disabled = data.skip === 0;
+            $('lookup-next').disabled = !data.hasNext;
+            picker.take = data.take;
+        }
+
+        function choose(item) {
+            const input = picker.input;
+            input.value = item.value;
+            input.classList.remove('is-invalid');
+            const group = input.closest('[data-group]');
+            group.querySelector('[data-lookup-text]').textContent = item.text !== item.value ? item.text : '';
+            modalOf('lookup-modal').hide();
+        }
+
+        function openPicker(input) {
+            picker.input = input;
+            picker.field = input.dataset.field;
+            picker.skip = 0;
+            picker.q = '';
+            picker.take = 10;
+            $('lookup-q').value = '';
+            $('lookup-title').textContent = 'Pilih ' + (input.closest('[data-group]').querySelector('label')?.textContent || 'data').replace(/\s*\*$/, '');
+            pendingPicker = true;
+            modalOf('record-modal').hide();
+        }
+
+        let pendingPicker = false;
+        // the record modal is gone: show the picker; the picker is gone: bring the record modal back
+        $('record-modal').addEventListener('hidden.bs.modal', () => {
+            if (!pendingPicker) return;
+            pendingPicker = false;
+            picker.returning = true;
+            modalOf('lookup-modal').show();
+            loadPicker();
+        });
+        $('lookup-modal').addEventListener('shown.bs.modal', () => $('lookup-q').focus());
+        $('lookup-modal').addEventListener('hidden.bs.modal', () => {
+            if (!picker.returning) return;
+            picker.returning = false;
+            modalOf('record-modal').show();
+        });
+
+        $('lookup-form').addEventListener('submit', (ev) => { ev.preventDefault(); picker.q = $('lookup-q').value.trim(); picker.skip = 0; loadPicker(); });
+        $('lookup-prev').addEventListener('click', () => { picker.skip = Math.max(0, picker.skip - (picker.take || 10)); loadPicker(); });
+        $('lookup-next').addEventListener('click', () => { picker.skip += picker.take || 10; loadPicker(); });
+
+        recordForm.addEventListener('click', (ev) => {
+            const pick = ev.target.closest('[data-lookup-pick]');
+            const clear = ev.target.closest('[data-lookup-clear]');
+            if (pick) openPicker(pick.closest('[data-group]').querySelector('[data-lookup="browse"]'));
+            if (clear) {
+                const input = clear.closest('[data-group]').querySelector('[data-lookup="browse"]');
+                input.value = '';
+                clear.closest('[data-group]').querySelector('[data-lookup-text]').textContent = '';
             }
         });
     }
