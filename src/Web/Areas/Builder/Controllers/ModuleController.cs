@@ -443,7 +443,7 @@ public class ModuleController(
             if (id == selfId) { errors.Add("Halaman tidak bisa menyematkan dirinya sendiri."); continue; }
             var target = await modules.GetAsync(id, ct);
             if (target is null) errors.Add($"Module yang disematkan tidak ditemukan: {id}.");
-            else if (target.Type == ModuleType.Page) errors.Add($"Module '{target.Name}' bertipe Page; hanya module Table atau Form yang bisa disematkan.");
+            else if (target.Type == ModuleType.Page) errors.Add($"Module '{target.Name}' bertipe Page; module Page tidak bisa disematkan di dalam module lain.");
             else if (target.Status != ModuleStatus.Published) notes.Add($"Catatan: module '{target.Name}' yang disematkan masih Draft, tampil kosong sampai dipublikasikan.");
         }
         return errors;
@@ -513,7 +513,7 @@ public class ModuleController(
             .Select(d => new DataSourceOption(d.Id, d.Code, d.Name, ModuleDisplayText.ModeLabel(d.Mode)))
             .ToList();
         model.WriteEnabled = dbOptions.Value.AllowWrite;
-        model.EmbeddableModules = (await modules.ListAsync(ct: ct)).Where(m => m.Type is ModuleType.Table or ModuleType.Form).ToList();
+        model.EmbeddableModules = (await modules.ListAsync(ct: ct)).Where(m => m.Type != ModuleType.Page).ToList();
 
         if (model.IsEdit && model.Id is { } moduleId)
             model.Status = (await modules.GetAsync(moduleId, ct))?.Status ?? model.Status;

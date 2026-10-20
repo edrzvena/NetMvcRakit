@@ -29,10 +29,10 @@ public sealed class ModuleFormViewModel
 
     public Guid? DataSourceId { get; set; }
 
-    /// <summary>Page modules: the HTML (sanitized when saved). <c>{{module:GUID}}</c> embeds a Table or Form module.</summary>
+    /// <summary>Page modules: the HTML (sanitized when saved). <c>{{module:GUID}}</c> embeds a Table, Form, Chart or Widget module.</summary>
     public string? PageHtml { get; set; }
 
-    /// <summary>Table and Form modules a Page may embed, for the "Sisipkan module" helper.</summary>
+    /// <summary>Every module but a Page (Table, Form, Chart, Widget) a Page may embed, for the "Sisipkan module" helper.</summary>
     public IReadOnlyList<ModuleSummary> EmbeddableModules { get; set; } = [];
 
     /// <summary>Optional record actions: Detail is a Query data source, the other three are Command data sources.</summary>

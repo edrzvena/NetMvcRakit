@@ -180,8 +180,12 @@
                 <div class="alert alert-info small" role="note">
                     HTML <strong>disanitasi saat disimpan</strong> dan saat ditampilkan: script, iframe, event handler, dan markup berbahaya lain dibuang (yang tersimpan
                     adalah hasil sanitasinya). Untuk menyematkan module lain, taruh penanda <code>{{module:GUID}}</code> pada barisnya sendiri
-                    (di antara tag atau di awal/akhir teks); pakai tombol <em>Sisipkan</em>. Hanya module Table atau Form yang bisa disematkan, maksimal @ModulePageHtml.MaxEmbeds per halaman.
+                    (di antara tag atau di awal/akhir teks); pakai tombol <em>Sisipkan</em>. Module Table, Form, Chart, dan Widget bisa disematkan (bukan Page), maksimal @ModulePageHtml.MaxEmbeds per halaman.
                     Module yang masih Draft tampil kosong sampai dipublikasikan.
+                    <br />
+                    Untuk dasbor, bungkus penanda dengan kolom Bootstrap supaya widget berjajar, misalnya
+                    <code>&lt;div class="row"&gt;&lt;div class="col-md-4"&gt;{{module:GUID}}&lt;/div&gt;&lt;div class="col-md-8"&gt;{{module:GUID}}&lt;/div&gt;&lt;/div&gt;</code>.
+                    Query string halaman ini tidak diteruskan ke module yang disematkan.
                 </div>
                 <label class="form-label" for="PageHtml">HTML</label>
                 <textarea class="form-control font-monospace" id="PageHtml" name="PageHtml" rows="14" spellcheck="false" maxlength="@ModulePage.MaxHtmlLength">@Model.PageHtml</textarea>
