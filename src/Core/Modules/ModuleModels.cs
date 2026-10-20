@@ -92,6 +92,24 @@ public sealed class ModuleDisplay
     public List<ModuleColumn> Columns { get; set; } = [];
 }
 
+/// <summary>
+/// Which record buttons a runtime page offers. Each needs its data source; the write ones also need Rakit:Db:AllowWrite
+/// (the data source service refuses Command statements without it anyway, so the buttons would only fail).
+/// Edit needs both Detail (to fill the form) and Update.
+/// </summary>
+public sealed record ModuleRecordActions(bool CanAdd, bool CanEdit, bool CanDelete)
+{
+    public static ModuleRecordActions For(ModuleConfig config, bool allowWrite)
+    {
+        var source = config.Source;
+        return new ModuleRecordActions(
+            CanAdd: allowWrite && source.Insert is not null && config.Form.Fields.Count > 0,
+            CanEdit: allowWrite && source.Update is not null && source.Detail is not null && config.Form.Fields.Count > 0
+                     && !string.IsNullOrWhiteSpace(config.Display.KeyField),
+            CanDelete: allowWrite && source.Delete is not null && !string.IsNullOrWhiteSpace(config.Display.KeyField));
+    }
+}
+
 /// <summary>Stored, not enforced until a login phase exists (no OIDC yet).</summary>
 public sealed class ModuleAccess
 {

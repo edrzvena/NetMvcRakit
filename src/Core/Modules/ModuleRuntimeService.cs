@@ -30,6 +30,8 @@ public sealed record ModuleListColumn(string Field, string Label, bool Sortable,
 /// <param name="TotalCount">Null when the data source cannot count.</param>
 /// <param name="HasNext">With a total: more rows exist after this page. Without one: this page is full.</param>
 /// <param name="OrderBy">The sort that was actually applied (canonical field spelling), or null.</param>
+/// <param name="Keys">One raw key text per row (the <c>display.keyField</c> column, invariant culture; null = that row has no key),
+/// only when the module has a Detail, Update or Delete source and the result has that column. Otherwise null.</param>
 public sealed record ModuleListResult(
     Module Module,
     IReadOnlyList<ModuleListColumn> Columns,
@@ -39,7 +41,8 @@ public sealed record ModuleListResult(
     int Take,
     bool HasNext,
     string? OrderBy,
-    string? Search);
+    string? Search,
+    IReadOnlyList<string?>? Keys = null);
 
 public interface IModuleRuntimeService
 {
@@ -146,7 +149,24 @@ public sealed class ModuleRuntimeService(
             .ToList();
 
         var hasNext = result.TotalCount is { } total ? skip + rows.Count < total : list.Rows.Count >= take;
-        return new ModuleListResult(module, columns, rows, result.TotalCount, skip, take, hasNext, orderBy, search);
+        return new ModuleListResult(module, columns, rows, result.TotalCount, skip, take, hasNext, orderBy, search,
+            ReadKeys(module.Config, list, take));
+    }
+
+    private static List<string?>? ReadKeys(ModuleConfig config, DataTableResult list, int take)
+    {
+        var source = config.Source;
+        var keyField = config.Display.KeyField?.Trim();
+        if (string.IsNullOrEmpty(keyField) || (source.Detail is null && source.Update is null && source.Delete is null)) return null;
+
+        var index = IndexOf(list.Columns, keyField);
+        if (index < 0) return null;
+
+        return list.Rows.Take(take)
+            .Select(row => index < row.Count && row[index] is { } value
+                ? value is IFormattable f ? f.ToString(null, System.Globalization.CultureInfo.InvariantCulture) : value.ToString()
+                : null)
+            .ToList();
     }
 
     /// <summary>Only a configured, sortable column can be sorted on; anything else is ignored (it comes from a URL).</summary>

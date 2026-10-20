@@ -108,6 +108,9 @@ public static partial class ModuleInputValidator
         else if (string.IsNullOrEmpty(keyField) && (source?.Detail is not null || source?.Update is not null || source?.Delete is not null))
             errors.Add("KeyField wajib diisi bila module punya Detail, Update, atau Delete.");
 
+        if (source?.Update is not null && source.Detail is null)
+            errors.Add("Update membutuhkan Detail: form ubah diisi dari data source Detail.");
+
         var fields = config.Form?.Fields ?? [];
         if (fields.Count > MaxFormFields)
             errors.Add($"Form maksimal {MaxFormFields} field.");
