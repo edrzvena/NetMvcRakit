@@ -27,7 +27,90 @@ public class ModuleController(
     // ---- list ----------------------------------------------------------------------------------
 
     public Task<IActionResult> Index(CancellationToken ct) => GuardAsync(async () =>
-        View(new ModuleIndexViewModel(await modules.ListAsync(ct: ct), TempData["Message"] as string)));
+        View(new ModuleIndexViewModel(await modules.ListAsync(ct: ct), TempData["Message"] as string, TempData["Error"] as string)));
+
+    // ---- publish / unpublish / copy / delete (each is a POST from the list) -----------------------
+
+    /// <summary>
+    /// Makes the module visible at runtime. The stored configuration is re-validated by the repository; on top of that
+    /// the list data source must still exist and be a Query data source (the module only stores its id).
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    public Task<IActionResult> Publish(Guid id, CancellationToken ct) => GuardAsync(async () =>
+    {
+        var module = await modules.GetAsync(id, ct);
+        if (module is null) return NotFound();
+
+        var problem = await ListSourceProblemAsync(module.Config.Source.List?.DataSourceId, ct);
+        if (problem is not null)
+        {
+            TempData["Error"] = $"Module '{module.Name}' belum bisa dipublikasikan: {problem}";
+            return RedirectToAction(nameof(Index));
+        }
+
+        try
+        {
+            await modules.SetStatusAsync(id, ModuleStatus.Published, CurrentUser, ct);
+            TempData["Message"] = $"Module '{module.Name}' dipublikasikan: sekarang bisa dibuka di halaman runtime.";
+        }
+        catch (ModuleValidationException ex)
+        {
+            TempData["Error"] = $"Module '{module.Name}' belum bisa dipublikasikan: {string.Join(" ", ex.Errors)}";
+        }
+        return RedirectToAction(nameof(Index));
+    });
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public Task<IActionResult> Unpublish(Guid id, CancellationToken ct) => GuardAsync(async () =>
+    {
+        try
+        {
+            var module = await modules.SetStatusAsync(id, ModuleStatus.Draft, CurrentUser, ct);
+            TempData["Message"] = $"Module '{module.Name}' dikembalikan ke draft: tidak lagi bisa dibuka di halaman runtime.";
+        }
+        catch (ModuleNotFoundException)
+        {
+            return NotFound();
+        }
+        return RedirectToAction(nameof(Index));
+    });
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public Task<IActionResult> Copy(Guid id, CancellationToken ct) => GuardAsync(async () =>
+    {
+        try
+        {
+            var copy = await modules.CopyAsync(id, CurrentUser, ct);
+            TempData["Message"] = $"Disalin sebagai '{copy.Name}' (draft).";
+        }
+        catch (ModuleNotFoundException)
+        {
+            return NotFound();
+        }
+        return RedirectToAction(nameof(Index));
+    });
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public Task<IActionResult> Delete(Guid id, CancellationToken ct) => GuardAsync(async () =>
+    {
+        var module = await modules.GetAsync(id, ct);
+        if (module is null) return NotFound();
+
+        try
+        {
+            await modules.DeleteAsync(id, CurrentUser, ct);
+            TempData["Message"] = $"Module '{module.Name}' dihapus.";
+        }
+        catch (ModuleInUseException ex)
+        {
+            TempData["Error"] = $"Module '{module.Name}' tidak bisa dihapus: masih dipakai {ex.MenuCount} menu. Hapus atau arahkan ulang menu itu dulu.";
+        }
+        catch (ModuleNotFoundException)
+        {
+            return NotFound();
+        }
+        return RedirectToAction(nameof(Index));
+    });
 
     // ---- create --------------------------------------------------------------------------------
 
@@ -189,15 +272,9 @@ public class ModuleController(
         if (errors.Count > 0) return null;
 
         // The module only stores the data source's id, so this is where a wrong or unsuitable one is caught.
-        var ds = await dataSources.GetAsync(model.DataSourceId!.Value, ct);
-        if (ds is null)
+        if (await ListSourceProblemAsync(model.DataSourceId, ct) is { } problem)
         {
-            ModelState.AddModelError("", "Data source tidak ditemukan.");
-            return null;
-        }
-        if (ds.StatementType != StatementType.Query)
-        {
-            ModelState.AddModelError("", $"Data source '{ds.Code}' bertipe Command; sumber list harus bertipe Query.");
+            ModelState.AddModelError("", problem);
             return null;
         }
 
@@ -222,6 +299,18 @@ public class ModuleController(
         }
 
         return input;
+    }
+
+    /// <summary>Why the data source cannot be a module's list source (gone, or a Command data source), or null when it is fine.</summary>
+    private async Task<string?> ListSourceProblemAsync(Guid? dataSourceId, CancellationToken ct)
+    {
+        if (dataSourceId is null || dataSourceId == Guid.Empty) return "Module Table membutuhkan data source untuk list.";
+
+        var ds = await dataSources.GetAsync(dataSourceId.Value, ct);
+        if (ds is null) return "Data source tidak ditemukan.";
+        if (ds.StatementType != StatementType.Query)
+            return $"Data source '{ds.Code}' bertipe Command; sumber list harus bertipe Query.";
+        return null;
     }
 
     /// <summary>Exception filter used for its side effect: turns expected failures into form errors.</summary>

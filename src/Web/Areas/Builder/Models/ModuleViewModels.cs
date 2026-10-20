@@ -4,7 +4,7 @@ using Rakit.Core.Modules;
 
 namespace Rakit.Web.Areas.Builder.Models;
 
-public sealed record ModuleIndexViewModel(IReadOnlyList<ModuleSummary> Items, string? Message);
+public sealed record ModuleIndexViewModel(IReadOnlyList<ModuleSummary> Items, string? Message, string? Error = null);
 
 /// <summary>A data source a Table module can list from (statement type Query only).</summary>
 public sealed record DataSourceOption(Guid Id, string Code, string Name, string ModeLabel);

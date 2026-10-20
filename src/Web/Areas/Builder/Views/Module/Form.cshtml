@@ -14,6 +14,14 @@
 
 <div asp-validation-summary="All" class="alert alert-danger"></div>
 
+@if (Model.IsEdit && Model.Status == ModuleStatus.Published)
+{
+    <div class="alert alert-info" role="note">
+        Module ini <strong>Published</strong>: perubahan yang disimpan langsung berlaku di halaman runtime.
+        Untuk mengerjakannya tanpa mengganggu pengguna, salin dulu modulenya lalu ubah salinan draft-nya.
+    </div>
+}
+
 <form id="module-form" method="post" asp-area="Builder" asp-controller="Module" asp-action="@(Model.IsEdit ? "Edit" : "Create")" asp-route-id="@Model.Id">
     <input type="hidden" id="ConfigJson" name="ConfigJson" value="@Model.ConfigJson" />
 

@@ -12,6 +12,10 @@
 {
     <div class="alert alert-success" role="status">@Model.Message</div>
 }
+@if (!string.IsNullOrEmpty(Model.Error))
+{
+    <div class="alert alert-danger" role="alert">@Model.Error</div>
+}
 
 @if (Model.Items.Count == 0)
 {
@@ -26,16 +30,37 @@ else
         <tbody>
             @foreach (var m in Model.Items)
             {
+                var published = m.Status == ModuleStatus.Published;
                 <tr>
                     <td>@m.Name</td>
                     <td>@(m.GroupName ?? "-")</td>
                     <td>@ModuleDisplayText.TypeLabel(m.Type)</td>
                     <td>
-                        <span class="badge @(m.Status == ModuleStatus.Published ? "bg-success" : "bg-secondary")">@ModuleDisplayText.StatusLabel(m.Status)</span>
+                        <span class="badge @(published ? "bg-success" : "bg-secondary")">@ModuleDisplayText.StatusLabel(m.Status)</span>
                     </td>
                     <td>@(m.Updated?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "-")</td>
                     <td class="text-end text-nowrap">
                         <a class="btn btn-sm btn-outline-primary" asp-area="Builder" asp-controller="Module" asp-action="Edit" asp-route-id="@m.Id">Ubah</a>
+                        @if (published)
+                        {
+                            <form class="d-inline" method="post" asp-area="Builder" asp-controller="Module" asp-action="Unpublish" asp-route-id="@m.Id">
+                                <button type="submit" class="btn btn-sm btn-outline-warning">Unpublish</button>
+                            </form>
+                        }
+                        else
+                        {
+                            <form class="d-inline" method="post" asp-area="Builder" asp-controller="Module" asp-action="Publish" asp-route-id="@m.Id">
+                                <button type="submit" class="btn btn-sm btn-outline-success">Publish</button>
+                            </form>
+                        }
+                        <form class="d-inline" method="post" asp-area="Builder" asp-controller="Module" asp-action="Copy" asp-route-id="@m.Id">
+                            <button type="submit" class="btn btn-sm btn-outline-secondary">Salin</button>
+                        </form>
+                        @* the name is free text: it travels in an encoded attribute, never inside a JavaScript string *@
+                        <form class="d-inline" method="post" asp-area="Builder" asp-controller="Module" asp-action="Delete" asp-route-id="@m.Id"
+                              data-confirm="Hapus module @m.Name?" onsubmit="return confirm(this.dataset.confirm);">
+                            <button type="submit" class="btn btn-sm btn-outline-danger">Hapus</button>
+                        </form>
                     </td>
                 </tr>
             }
