@@ -282,6 +282,25 @@ public static partial class ModuleInputValidator
         }
     }
 
+    /// <summary>
+    /// Checks the lookup data sources of select / browse fields, which needs the data source rows: each must exist and be a
+    /// Query (a lookup is read on a GET and must never write). <paramref name="kindOf"/> returns null for an unknown data source.
+    /// </summary>
+    public static IReadOnlyList<string> ValidateLookupSourceKinds(IEnumerable<ModuleFormField> fields, Func<Guid, StatementType?> kindOf)
+    {
+        var errors = new List<string>();
+        foreach (var field in fields)
+        {
+            if (!ModuleFieldValue.IsLookup(field.Type) || field.Lookup is null || field.Lookup.DataSourceId == Guid.Empty) continue;
+            var name = field.Name?.Trim() ?? "";
+            if (kindOf(field.Lookup.DataSourceId) is not { } kind)
+                errors.Add($"Data source lookup untuk field '{name}' tidak ditemukan.");
+            else if (kind != StatementType.Query)
+                errors.Add($"Data source lookup untuk field '{name}' harus berjenis Query.");
+        }
+        return errors;
+    }
+
     private static string Shorten(string text) => text.Length <= 30 ? text : text[..30] + "...";
 }
 

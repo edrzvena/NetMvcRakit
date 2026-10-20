@@ -22,8 +22,10 @@
     config.form = config.form || {};
     config.form.fields = config.form.fields || [];
     const fields = config.form.fields; // edited in place: [{name, label, type, required, maxLength, regex, default, readonly}]
-    const FIELD_TYPES = [['text', 'Text'], ['textarea', 'Textarea'], ['number', 'Number'], ['date', 'Date'], ['dateTime', 'DateTime'], ['boolean', 'Boolean']];
-    const isTextType = (t) => t === 'text' || t === 'textarea';
+    const FIELD_TYPES = [['text', 'Text'], ['textarea', 'Textarea'], ['number', 'Number'], ['date', 'Date'], ['dateTime', 'DateTime'], ['boolean', 'Boolean'],
+        ['select', 'Select (dropdown lookup)'], ['browse', 'Browse (modal cari)']];
+    const isLookupType = (t) => t === 'select' || t === 'browse';
+    const isTextType = (t) => t === 'text' || t === 'textarea' || isLookupType(t); // MaxLength / Regex apply (a lookup value is stored as text)
 
     let known = null; // Set of lower-case column names last loaded from the data source (null = not loaded)
 
@@ -126,10 +128,56 @@
             const regex = el('input', { class: 'form-control form-control-sm', value: f.regex || '', placeholder: 'regex (seluruh nilai)', maxlength: '500' });
             const def = el('input', { class: 'form-control form-control-sm', value: f.default || '', placeholder: 'default' });
 
+            // lookup (select / browse): where the choices come from
+            const lookup = f.lookup = f.lookup || { dataSourceId: '', valueField: '', textField: '' };
+            const lkSource = el('select', { class: 'form-select form-select-sm', 'aria-label': 'Data source lookup' });
+            lkSource.appendChild(el('option', { value: '', text: '- data source lookup (Query) -' }));
+            [...$('DataSourceId').options].filter((o) => o.value).forEach((o) => {
+                const opt = el('option', { value: o.value, text: o.textContent.trim() });
+                if (o.value === lookup.dataSourceId) opt.selected = true;
+                lkSource.appendChild(opt);
+            });
+            if (lookup.dataSourceId && ![...lkSource.options].some((o) => o.value === lookup.dataSourceId)) {
+                const missing = el('option', { value: lookup.dataSourceId, text: '(tidak ditemukan atau bukan Query) ' + lookup.dataSourceId });
+                missing.selected = true;
+                lkSource.appendChild(missing);
+            }
+            const colsId = 'lk-cols-' + i;
+            const lkValue = el('input', { class: 'form-control form-control-sm', value: lookup.valueField || '', placeholder: 'kolom nilai (disimpan)', list: colsId, maxlength: '128' });
+            const lkText = el('input', { class: 'form-control form-control-sm', value: lookup.textField || '', placeholder: 'kolom teks (dibaca user)', list: colsId, maxlength: '128' });
+            const lkCols = el('datalist', { id: colsId });
+            const lkStatus = el('span', { class: 'small text-muted ms-1', 'aria-live': 'polite' });
+            const lkLoad = el('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary', text: 'Muat kolom' });
+            lkSource.addEventListener('change', () => { lookup.dataSourceId = lkSource.value; lkCols.replaceChildren(); lkStatus.textContent = ''; });
+            lkValue.addEventListener('input', () => { lookup.valueField = lkValue.value.trim(); });
+            lkText.addEventListener('input', () => { lookup.textField = lkText.value.trim(); });
+            lkLoad.addEventListener('click', async () => {
+                if (!lkSource.value) { lkStatus.textContent = 'Pilih data source dulu.'; return; }
+                lkStatus.textContent = 'memuat...';
+                try {
+                    const res = await postJson('/Builder/Module/LoadColumns', { dataSourceId: lkSource.value });
+                    if (!res.ok) { lkStatus.textContent = ''; lkRow.appendChild(el('div', { class: 'col-12' }, [errorBox(res, 'Kolom lookup tidak dapat dimuat.')])); return; }
+                    const names = res.data.columns.map((c) => c.name);
+                    lkCols.replaceChildren(...names.map((n) => el('option', { value: n })));
+                    // first column = value, second (or the same one) = text, only where nothing is filled in yet
+                    if (!lookup.valueField && names.length > 0) { lookup.valueField = names[0]; lkValue.value = names[0]; }
+                    if (!lookup.textField && names.length > 0) { lookup.textField = names[1] || names[0]; lkText.value = lookup.textField; }
+                    lkStatus.textContent = names.length + ' kolom dimuat.';
+                } catch (e) {
+                    lkStatus.textContent = 'Server tidak dapat dihubungi.';
+                }
+            });
+            const lkRow = el('div', { class: 'row g-2 align-items-center mt-1' }, [
+                el('div', { class: 'col-md-4' }, [lkSource]), el('div', { class: 'col-md-3' }, [lkValue]), el('div', { class: 'col-md-3' }, [lkText, lkCols]),
+                el('div', { class: 'col-md-2 text-nowrap' }, [lkLoad, lkStatus]),
+            ]);
+
             const syncType = () => {
-                const text = isTextType(f.type || 'text');
+                const t = f.type || 'text';
+                const text = isTextType(t);
                 maxLength.disabled = !text;
                 regex.disabled = !text;
+                lkRow.classList.toggle('d-none', !isLookupType(t));
             };
             name.addEventListener('input', () => { f.name = name.value.trim(); });
             label.addEventListener('input', () => { f.label = label.value; });
@@ -157,6 +205,7 @@
                 el('div', { class: 'row g-2 align-items-center' }, [
                     el('div', { class: 'col-md-2' }, [maxLength]), el('div', { class: 'col-md-6' }, [regex]), el('div', { class: 'col-md-4' }, [def]),
                 ]),
+                lkRow,
             ]);
         });
         host.replaceChildren(...rows);
@@ -254,6 +303,10 @@
                 if (f.regex) out.regex = f.regex;
             }
             if (f.default) out.default = f.default;
+            // A lookup without a data source is left out so the server reports "membutuhkan lookup" instead of failing to read the config.
+            if (isLookupType(type) && f.lookup && f.lookup.dataSourceId) {
+                out.lookup = { dataSourceId: f.lookup.dataSourceId, valueField: (f.lookup.valueField || '').trim(), textField: (f.lookup.textField || '').trim() };
+            }
             return out;
         });
         const display = {

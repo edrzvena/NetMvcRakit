@@ -45,7 +45,7 @@ public class ModuleController(
         if (module is null) return NotFound();
 
         var problem = await ListSourceProblemAsync(module.Config.Source.List?.DataSourceId, ct)
-            ?? (await RecordSourceProblemsAsync(module.Config.Source, ct)).FirstOrDefault();
+            ?? (await RecordSourceProblemsAsync(module.Config, ct)).FirstOrDefault();
         if (problem is not null)
         {
             TempData["Error"] = $"Module '{module.Name}' belum bisa dipublikasikan: {problem}";
@@ -297,7 +297,7 @@ public class ModuleController(
             ModelState.AddModelError("", problem);
             return null;
         }
-        var recordProblems = await RecordSourceProblemsAsync(config.Source, ct);
+        var recordProblems = await RecordSourceProblemsAsync(config, ct);
         foreach (var e in recordProblems) ModelState.AddModelError("", e);
         if (recordProblems.Count > 0) return null;
 
@@ -326,13 +326,20 @@ public class ModuleController(
 
     private static DataSourceRef? Ref(Guid? id) => id is { } value ? new DataSourceRef { DataSourceId = value } : null;
 
-    /// <summary>What is wrong with the Detail / Insert / Update / Delete data sources: gone, or the wrong statement type.</summary>
-    private async Task<IReadOnlyList<string>> RecordSourceProblemsAsync(ModuleSource source, CancellationToken ct)
+    /// <summary>
+    /// What is wrong with the Detail / Insert / Update / Delete data sources and with the lookup data sources of select /
+    /// browse fields: gone, or the wrong statement type.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> RecordSourceProblemsAsync(ModuleConfig config, CancellationToken ct)
     {
-        if (source.Detail is null && source.Insert is null && source.Update is null && source.Delete is null) return [];
+        var source = config.Source;
+        var hasLookups = config.Form.Fields.Any(f => ModuleFieldValue.IsLookup(f.Type) && f.Lookup is not null);
+        if (!hasLookups && source.Detail is null && source.Insert is null && source.Update is null && source.Delete is null) return [];
+
         var kinds = (await dataSources.ListAsync(ct)).ToDictionary(d => d.Id, d => d.StatementType);
-        return ModuleInputValidator.ValidateRecordSourceKinds(
-            source, id => kinds.TryGetValue(id, out var kind) ? kind : null);
+        StatementType? KindOf(Guid id) => kinds.TryGetValue(id, out var kind) ? kind : null;
+        return [.. ModuleInputValidator.ValidateRecordSourceKinds(source, KindOf),
+                .. ModuleInputValidator.ValidateLookupSourceKinds(config.Form.Fields, KindOf)];
     }
 
     /// <summary>Why the data source cannot be a module's list source (gone, or a Command data source), or null when it is fine.</summary>

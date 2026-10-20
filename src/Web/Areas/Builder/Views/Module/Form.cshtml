@@ -203,8 +203,12 @@
                 <div id="fields"></div>
                 <div class="form-text">
                     Saran field membaca kolom data source Detail (lewat jalur preview, tanpa menyimpan apa pun); dengan kunci contoh, tipe ditebak dari nilainya.
-                    Kolom kunci tidak disarankan. Tanggal ditulis <code>yyyy-MM-dd</code> pada <em>default</em>. MaxLength dan Regex hanya untuk text dan textarea;
+                    Kolom kunci tidak disarankan. Tanggal ditulis <code>yyyy-MM-dd</code> pada <em>default</em>. MaxLength dan Regex untuk text, textarea, select, dan browse;
                     Regex harus cocok dengan seluruh nilai.
+                    <br />
+                    <strong>Select</strong> = dropdown (sampai 200 pilihan), <strong>Browse</strong> = modal cari dan pilih (per 50). Keduanya mengambil pilihan dari data source
+                    Query (yang sama dengan daftar data source List): kolom <em>nilai</em> yang disimpan sebagai teks dan kolom <em>teks</em> yang dibaca pengguna. Data source
+                    lookup yang bisa dicari perlu parameter <code>@@Search</code> (dan <code>@@Skip</code>/<code>@@Take</code> untuk paging).
                 </div>
             </div>
         </div>
