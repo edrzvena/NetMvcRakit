@@ -6,7 +6,7 @@ namespace Rakit.Web.Areas.Builder.Models;
 /// <summary>Body of POST /Builder/DataSource/Preview. The definition is the same JSON the form saves.</summary>
 public sealed class DataSourcePreviewRequest
 {
-    /// <summary>"Table" or "Query" (case-insensitive).</summary>
+    /// <summary>"Table", "Query" or "StoredProcedure" (case-insensitive).</summary>
     public string Mode { get; set; } = "";
 
     /// <summary>"Query" or "Command" (case-insensitive).</summary>
@@ -21,7 +21,17 @@ public sealed class DataSourcePreviewRequest
 public sealed record PreviewResultSet(
     IReadOnlyList<string> Columns, IReadOnlyList<IReadOnlyList<string?>> Rows, bool Truncated);
 
-public sealed record PreviewResponse(IReadOnlyList<PreviewResultSet> ResultSets, int? TotalCount, long DurationMs);
+/// <summary>
+/// The procedure fields are only meaningful when <see cref="IsProcedure"/> is true. Output values are formatted like
+/// cells (null stays null); <see cref="ReturnValue"/> is null when the call was cut short by the row cap.
+/// </summary>
+public sealed record PreviewResponse(IReadOnlyList<PreviewResultSet> ResultSets, int? TotalCount, long DurationMs)
+{
+    public bool IsProcedure { get; init; }
+    public int ListResultSet { get; init; }
+    public int? ReturnValue { get; init; }
+    public IReadOnlyDictionary<string, string?> OutputParameters { get; init; } = new Dictionary<string, string?>();
+}
 
 public static class PreviewFormat
 {

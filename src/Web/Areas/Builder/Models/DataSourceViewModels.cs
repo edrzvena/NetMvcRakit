@@ -25,8 +25,12 @@ public sealed class DataSourceFormViewModel
     public int? Version { get; set; }
     public IReadOnlyList<TableInfo> Tables { get; set; } = [];
     public bool TablesUnavailable { get; set; }
+
+    /// <summary>Stored procedures that exist in an allowed schema AND are active in the whitelist.</summary>
+    public IReadOnlyList<ProcedureInfo> Procedures { get; set; } = [];
     public bool AllowRawQuery { get; set; }
     public bool AllowWrite { get; set; }
+    public bool AllowStoredProcedure { get; set; }
     public bool IsEdit => Id is not null;
 }
 

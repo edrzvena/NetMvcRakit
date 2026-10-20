@@ -45,8 +45,8 @@
             <label class="form-check-label" for="mode-query">Query</label>
         </div>
         <div class="form-check form-check-inline">
-            <input class="form-check-input" type="radio" disabled id="mode-sp" />
-            <label class="form-check-label text-muted" for="mode-sp">Stored Procedure (segera)</label>
+            <input class="form-check-input" type="radio" name="Mode" id="mode-sp" value="StoredProcedure" @(Model.Mode == Rakit.Core.DataSources.DataSourceMode.StoredProcedure ? "checked" : "") />
+            <label class="form-check-label" for="mode-sp">Stored Procedure</label>
         </div>
     </div>
 
@@ -111,18 +111,78 @@
                 Token <code>@@Skip</code>, <code>@@Take</code>, <code>@@OrderBy</code>, <code>@@Search</code>, <code>@@IsCount</code> tersedia otomatis.
             </div>
         </div>
-        <div class="mb-3">
-            <label class="form-label" for="statementType">Jenis statement</label>
-            <select class="form-select w-auto" id="statementType" name="StatementType">
-                <option value="Query" selected="@(Model.StatementType == Rakit.Core.DataSources.StatementType.Query)">Query (mengembalikan baris)</option>
-                <option value="Command" selected="@(Model.StatementType == Rakit.Core.DataSources.StatementType.Command)">Command (insert/update/delete)</option>
-            </select>
-            @if (!Model.AllowWrite)
-            {
-                <div class="form-text text-warning">Command dinonaktifkan (<code>Rakit:Db:AllowWrite = false</code>).</div>
-            }
-        </div>
         <button type="button" class="btn btn-sm btn-outline-secondary" id="detect-params">Deteksi parameter dari query</button>
+    </section>
+
+    @* ---------------- Stored procedure mode ---------------- *@
+    <section id="panel-sp" class="border rounded p-3 mb-3">
+        <h2 class="h5">Stored procedure</h2>
+        @if (!Model.AllowStoredProcedure)
+        {
+            <div class="alert alert-info">
+                Stored procedure dinonaktifkan (<code>Rakit:Db:AllowStoredProcedure = false</code>): boleh disimpan, belum bisa dijalankan.
+            </div>
+        }
+        @if (Model.TablesUnavailable)
+        {
+            <div class="alert alert-warning">Daftar prosedur tidak dapat dibaca saat ini (database tidak tersedia).</div>
+        }
+        <div class="mb-3">
+            <label class="form-label" for="procSelect">Prosedur</label>
+            <select class="form-select" id="procSelect">
+                <option value="">- pilih -</option>
+                @foreach (var p in Model.Procedures)
+                {
+                    <option value="@($"{p.Schema}.{p.Name}")" data-schema="@p.Schema" data-name="@p.Name">@p.Schema.@p.Name</option>
+                }
+            </select>
+            <div class="form-text">
+                Hanya prosedur yang aktif di <a asp-area="Admin" asp-controller="SpWhitelist" asp-action="Index">SP Whitelist</a> yang muncul di sini.
+            </div>
+            <div id="sp-warning" class="alert alert-warning mt-2 mb-0 d-none" role="alert">
+                Prosedur yang tersimpan tidak ada di whitelist atau sudah tidak aktif: data source ini tidak bisa disimpan atau dijalankan
+                sampai prosedurnya diaktifkan lagi atau diganti.
+            </div>
+        </div>
+
+        <div class="mb-3">
+            <span class="form-label d-block">Parameter prosedur</span>
+            <div id="sp-info"><span class="text-muted">Pilih prosedur dulu.</span></div>
+            <div class="form-text">
+                Parameter wajib (tanpa default) dibuatkan barisnya di "Parameter mapping" di bawah. Parameter yang di-map tapi nilainya kosong
+                dikirim sebagai <code>NULL</code>; hapus barisnya supaya default prosedur berlaku. Parameter paging
+                (<code>Skip</code>, <code>Take</code>, <code>OrderBy</code>, <code>Search</code>, <code>IsCount</code>) diisi otomatis bila dideklarasikan prosedur.
+            </div>
+        </div>
+
+        <div class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label" for="listResultSet">Result set list</label>
+                <input class="form-control" type="number" id="listResultSet" min="0" max="9" value="0" />
+                <div class="form-text">Urutan result set berisi baris (mulai dari 0).</div>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" for="countResultSet">Result set count</label>
+                <input class="form-control" type="number" id="countResultSet" min="0" max="9" />
+                <div class="form-text">Kosong = panggil ulang dengan <code>@@IsCount = 1</code> bila prosedur punya parameter itu.</div>
+            </div>
+        </div>
+    </section>
+
+    @* ---------------- Statement type (Query and Stored Procedure) ---------------- *@
+    <section id="panel-statement" class="border rounded p-3 mb-3">
+        <label class="form-label" for="statementType">Jenis statement</label>
+        <select class="form-select w-auto" id="statementType" name="StatementType">
+            <option value="Query" selected="@(Model.StatementType == Rakit.Core.DataSources.StatementType.Query)">Query (mengembalikan baris)</option>
+            <option value="Command" selected="@(Model.StatementType == Rakit.Core.DataSources.StatementType.Command)">Command (insert/update/delete)</option>
+        </select>
+        @if (!Model.AllowWrite)
+        {
+            <div class="form-text text-warning">Command dinonaktifkan (<code>Rakit:Db:AllowWrite = false</code>).</div>
+        }
+        <div class="form-text">
+            Untuk stored procedure, pilih Command bila prosedurnya mengubah data: Command hanya bisa dijalankan bila <code>AllowWrite</code> aktif dan tidak bisa di-preview.
+        </div>
     </section>
 
     @* ---------------- Parameters ---------------- *@
@@ -146,6 +206,7 @@
         <div id="preview-result" class="mt-3" aria-live="polite"></div>
         <div class="form-text">
             Memakai definisi yang sedang diisi di form (tanpa perlu disimpan), maksimal 50 baris, hanya statement Query.
+            Stored procedure dijalankan sungguhan di dalam transaksi yang selalu di-rollback, jadi perubahan data dibatalkan.
             Pesan error database ditampilkan lengkap di sini karena ini layar builder.
         </div>
     </section>

@@ -22,8 +22,10 @@
     def.table.filters = def.table.filters || [];
     def.table.sort = def.table.sort || [];
     def.parameters = def.parameters || [];
+    def.procedure = def.procedure || { schema: '', name: '' };
 
     let columns = []; // [{name, dataType}] of the selected table
+    let procParams = null; // [{name, dataType, isOutput, hasDefault, isPaging}] of the selected procedure
 
     // ---- small DOM helpers (textContent only: nothing from the database is ever parsed as HTML) ----
     function el(tag, attrs, children) {
@@ -56,9 +58,11 @@
     // ---- mode / panels ----
     const currentMode = () => (form.querySelector('input[name="Mode"]:checked') || {}).value || 'Table';
     function applyMode() {
-        const table = currentMode() === 'Table';
-        $('panel-table').classList.toggle('d-none', !table);
-        $('panel-query').classList.toggle('d-none', table);
+        const mode = currentMode();
+        $('panel-table').classList.toggle('d-none', mode !== 'Table');
+        $('panel-query').classList.toggle('d-none', mode !== 'Query');
+        $('panel-sp').classList.toggle('d-none', mode !== 'StoredProcedure');
+        $('panel-statement').classList.toggle('d-none', mode === 'Table');
     }
     form.querySelectorAll('input[name="Mode"]').forEach((r) => r.addEventListener('change', applyMode));
 
@@ -110,6 +114,73 @@
     }
     tableSelect.addEventListener('change', () => loadColumns(false));
 
+    // ---- stored procedure ----
+    const procSelect = $('procSelect');
+
+    function selectedProc() {
+        const o = procSelect.selectedOptions[0];
+        return o && o.dataset.schema ? { schema: o.dataset.schema, name: o.dataset.name } : null;
+    }
+
+    const isMapped = (name) => def.parameters.some((p) => (p.name || '').toLowerCase() === name.toLowerCase());
+
+    function renderProcInfo() {
+        const host = $('sp-info');
+        if (!selectedProc()) { host.replaceChildren(el('span', { class: 'text-muted', text: 'Pilih prosedur dulu.' })); return; }
+        if (!procParams) return; // still loading, or failed (message already shown)
+
+        const inputs = procParams.filter((p) => !p.isOutput && !p.isPaging);
+        const required = inputs.filter((p) => !p.hasDefault);
+        const optional = inputs.filter((p) => p.hasDefault);
+        const outputs = procParams.filter((p) => p.isOutput);
+        const paging = procParams.filter((p) => p.isPaging && !p.isOutput);
+        const lines = [];
+        const label = (p) => '@' + p.name + ' (' + p.dataType + ')';
+
+        lines.push(el('div', { class: 'small mb-1', text: required.length === 0
+            ? 'Parameter wajib: tidak ada.'
+            : 'Parameter wajib (sudah dibuatkan baris mapping): ' + required.map(label).join(', ') }));
+
+        if (optional.length > 0) {
+            const row = el('div', { class: 'small mb-1 d-flex flex-wrap gap-1 align-items-center' }, [el('span', { text: 'Parameter opsional (punya default), klik untuk di-map:' })]);
+            optional.forEach((p) => {
+                const mapped = isMapped(p.name);
+                row.appendChild(el('button', {
+                    type: 'button', class: 'btn btn-sm ' + (mapped ? 'btn-light text-muted' : 'btn-outline-secondary'),
+                    text: (mapped ? '✓ ' : '+ ') + label(p), disabled: mapped,
+                    onclick: () => { def.parameters.push({ name: p.name, source: 'queryString', key: p.name, value: '' }); renderParams(); renderProcInfo(); },
+                }));
+            });
+            lines.push(row);
+        }
+        if (paging.length > 0) lines.push(el('div', { class: 'small mb-1 text-muted', text: 'Diisi otomatis dari request: ' + paging.map((p) => '@' + p.name).join(', ') }));
+        if (outputs.length > 0) lines.push(el('div', { class: 'small mb-1 text-muted', text: 'OUTPUT (dibaca setelah dijalankan): ' + outputs.map(label).join(', ') }));
+        host.replaceChildren(...lines);
+    }
+
+    async function loadProcParams(autoAdd) {
+        const p = selectedProc();
+        procParams = null;
+        renderProcInfo();
+        if (!p) return;
+        try {
+            const url = '/Builder/DataSource/ProcedureParameters?schemaName=' + encodeURIComponent(p.schema) + '&name=' + encodeURIComponent(p.name);
+            const res = await fetch(url, { headers: { Accept: 'application/json' } });
+            if (!res.ok) throw new Error(String(res.status));
+            procParams = await res.json();
+        } catch (e) {
+            $('sp-info').replaceChildren(el('span', { class: 'text-danger', text: 'Parameter prosedur tidak dapat dimuat (tidak ada di whitelist, atau database tidak tersedia).' }));
+            return;
+        }
+        if (autoAdd) {
+            procParams.filter((x) => !x.isOutput && !x.isPaging && !x.hasDefault && !isMapped(x.name))
+                .forEach((x) => def.parameters.push({ name: x.name, source: 'queryString', key: x.name, value: '' }));
+            renderParams();
+        }
+        renderProcInfo();
+    }
+    procSelect.addEventListener('change', () => { $('sp-warning').classList.add('d-none'); loadProcParams(true); });
+
     // ---- filters ----
     function renderFilters() {
         const host = $('filters');
@@ -153,11 +224,11 @@
             const key = el('input', { class: 'form-control form-control-sm', placeholder: 'key', value: p.key || '' });
             const val = el('input', { class: 'form-control form-control-sm', placeholder: 'value', value: p.value || '' });
             name.addEventListener('input', () => { p.name = name.value.trim(); });
-            name.addEventListener('change', renderSamples);
+            name.addEventListener('change', () => { renderSamples(); renderProcInfo(); });
             src.addEventListener('change', () => { p.source = src.value; });
             key.addEventListener('input', () => { p.key = key.value.trim(); });
             val.addEventListener('input', () => { p.value = val.value; });
-            return el('div', { class: 'd-flex gap-2 mb-2' }, [name, src, key, val, removeButton(() => { def.parameters.splice(i, 1); renderParams(); })]);
+            return el('div', { class: 'd-flex gap-2 mb-2' }, [name, src, key, val, removeButton(() => { def.parameters.splice(i, 1); renderParams(); renderProcInfo(); })]);
         }));
         renderSamples();
     }
@@ -176,10 +247,17 @@
 
     // ---- definition (shared by Save and Preview) ----
     function collectDefinition() {
-        const table = currentMode() === 'Table';
+        const mode = currentMode();
+        const table = mode === 'Table';
         const out = { timeoutSeconds: parseInt($('timeoutSeconds').value, 10) || 30, parameters: [] };
 
-        if (table) {
+        if (mode === 'StoredProcedure') {
+            const sp = selectedProc();
+            out.procedure = { schema: sp ? sp.schema : '', name: sp ? sp.name : '' };
+            out.listResultSet = parseInt($('listResultSet').value, 10) || 0;
+            const count = parseInt($('countResultSet').value, 10);
+            if (!isNaN(count)) out.countResultSet = count;
+        } else if (table) {
             syncColumns();
             const t = selectedTable();
             out.table = {
@@ -241,7 +319,18 @@
             (data.totalCount != null ? ' | total ' + data.totalCount : '') +
             ' | ' + data.durationMs + ' ms' }));
 
-        data.resultSets.forEach((s) => {
+        const countIndex = parseInt($('countResultSet').value, 10);
+        if (data.isProcedure && data.listResultSet >= data.resultSets.length) {
+            parts.push(el('div', { class: 'alert alert-warning py-2', role: 'alert', text:
+                'Result set list (#' + data.listResultSet + ') tidak terbaca: prosedur hanya mengembalikan ' + data.resultSets.length +
+                ' result set, atau pembacaan berhenti di result set sebelumnya karena melewati batas 50 baris.' }));
+        }
+
+        data.resultSets.forEach((s, i) => {
+            if (data.isProcedure) {
+                const tags = (i === data.listResultSet ? ' (list)' : '') + (i === countIndex ? ' (count)' : '');
+                parts.push(el('div', { class: 'small fw-semibold mb-1', text: 'Result set #' + i + tags }));
+            }
             const head = el('tr', {}, s.columns.map((c) => el('th', { text: c })));
             const body = s.rows.map((r) => el('tr', {}, r.map((v) =>
                 v === null ? el('td', {}, [el('em', { class: 'text-muted', text: 'NULL' })]) : el('td', { text: v }))));
@@ -251,6 +340,18 @@
             if (s.truncated) parts.push(el('div', { class: 'small text-warning', text: 'Hasil dipotong: hanya sebagian baris yang ditampilkan.' }));
             if (s.rows.length === 0) parts.push(el('div', { class: 'small text-muted', text: 'Tidak ada baris.' }));
         });
+
+        if (data.isProcedure) {
+            const names = Object.keys(data.outputParameters || {});
+            const lines = [el('div', { class: 'small', text: 'Return value: ' + (data.returnValue == null ? '(tidak tersedia)' : data.returnValue) })];
+            names.forEach((n) => {
+                const v = data.outputParameters[n];
+                lines.push(el('div', { class: 'small' }, [
+                    el('span', { text: 'OUTPUT ' }), el('code', { text: '@' + n }), el('span', { text: ' = ' }),
+                    v === null ? el('em', { class: 'text-muted', text: 'NULL' }) : el('span', { text: v })]));
+            });
+            parts.push(el('div', { class: 'border rounded p-2' }, lines));
+        }
         $('preview-result').replaceChildren(...parts);
     }
 
@@ -299,8 +400,26 @@
         const wanted = (def.table.schema + '.' + def.table.name).toLowerCase();
         Array.from(tableSelect.options).forEach((o) => { if (o.value.toLowerCase() === wanted) o.selected = true; });
     }
+    if (def.procedure && def.procedure.name) {
+        const wanted = (def.procedure.schema + '.' + def.procedure.name).toLowerCase();
+        let found = false;
+        Array.from(procSelect.options).forEach((o) => { if (o.value.toLowerCase() === wanted) { o.selected = true; found = true; } });
+        if (!found) {
+            // Saved procedure is no longer offered (not whitelisted / inactive): keep it visible, saving will be refused by the server.
+            const o = el('option', { value: def.procedure.schema + '.' + def.procedure.name, text: def.procedure.schema + '.' + def.procedure.name + ' (tidak di-whitelist)' });
+            o.dataset.schema = def.procedure.schema;
+            o.dataset.name = def.procedure.name;
+            o.selected = true;
+            procSelect.appendChild(o);
+            $('sp-warning').classList.remove('d-none');
+        }
+    }
+    $('listResultSet').value = def.listResultSet || 0;
+    $('countResultSet').value = def.countResultSet == null ? '' : def.countResultSet;
+
     applyMode();
     renderParams();
     renderSorts();
     loadColumns(true);
+    if (currentMode() === 'StoredProcedure') loadProcParams(false);
 })();

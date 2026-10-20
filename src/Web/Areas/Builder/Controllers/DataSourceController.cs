@@ -4,6 +4,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
 using Rakit.Core.Config;
 using Rakit.Core.DataSources;
+using Rakit.Core.Procedures;
 using Rakit.Core.Schema;
 using Rakit.Core.Sql;
 using Rakit.Web.Areas.Builder.Models;
@@ -15,6 +16,7 @@ public class DataSourceController(
     IDataSourceRepository repository,
     IDataSourceService dataSources,
     ISchemaBrowserService schema,
+    ISpWhitelistService whitelist,
     IOptions<RakitDbOptions> options,
     ILogger<DataSourceController> logger) : Controller
 {
@@ -44,7 +46,7 @@ public class DataSourceController(
     [HttpPost, ValidateAntiForgeryToken]
     public Task<IActionResult> Create(DataSourceFormViewModel model, CancellationToken ct) => GuardAsync(async () =>
     {
-        if (TryBuildInput(model, out var input))
+        if (TryBuildInput(model, out var input) && await ProcedureAllowedAsync(input, ct))
         {
             try
             {
@@ -76,7 +78,7 @@ public class DataSourceController(
     public Task<IActionResult> Edit(Guid id, DataSourceFormViewModel model, CancellationToken ct) => GuardAsync(async () =>
     {
         model.Id = id;
-        if (TryBuildInput(model, out var input))
+        if (TryBuildInput(model, out var input) && await ProcedureAllowedAsync(input, ct))
         {
             try
             {
@@ -141,13 +143,20 @@ public class DataSourceController(
             var result = await dataSources.PreviewAsync(
                 new DataSourceInput { Mode = mode, StatementType = statement, Definition = definition }, samples, ct);
 
+            var isProcedure = mode == DataSourceMode.StoredProcedure;
             return Json(new PreviewResponse(
                 result.ResultSets.Select(s => new PreviewResultSet(
                     s.Columns,
                     s.Rows.Select(r => (IReadOnlyList<string?>)r.Select(PreviewFormat.Cell).ToList()).ToList(),
                     s.Truncated)).ToList(),
                 result.TotalCount,
-                (long)result.Duration.TotalMilliseconds));
+                (long)result.Duration.TotalMilliseconds)
+            {
+                IsProcedure = isProcedure,
+                ListResultSet = result.ListResultSetIndex,
+                ReturnValue = result.ReturnValue,
+                OutputParameters = result.OutputParameters.ToDictionary(kv => kv.Key, kv => PreviewFormat.Cell(kv.Value)),
+            });
         }
         catch (DataSourceValidationException ex)
         {
@@ -163,7 +172,9 @@ public class DataSourceController(
         }
         catch (Exception ex) when (ex is SchemaAccessDeniedException or SchemaObjectNotFoundException)
         {
-            return PreviewError(400, "Tabel tidak ditemukan atau tidak diizinkan.");
+            return PreviewError(400, mode == DataSourceMode.StoredProcedure
+                ? "Prosedur tidak ditemukan atau tidak diizinkan."
+                : "Tabel tidak ditemukan atau tidak diizinkan.");
         }
         catch (SqlExecutionException ex)
         {
@@ -192,7 +203,43 @@ public class DataSourceController(
         return Json(columns.Select(c => new { name = c.Name, dataType = c.DataType }));
     });
 
+    /// <summary>
+    /// Parameters of a WHITELISTED procedure, for the stored procedure panel. Anything else (not listed, inactive,
+    /// other schema, unknown) is a plain 404 without a hint which it was.
+    /// </summary>
+    [HttpGet]
+    public Task<IActionResult> ProcedureParameters(string? schemaName, string? name, CancellationToken ct) => GuardAsync(async () =>
+    {
+        if (!await whitelist.IsAllowedAsync(schemaName ?? "", name ?? "", ct)) return NotFound();
+
+        var parameters = await schema.GetProcedureParametersAsync(schemaName!, name!, ct);
+        return Json(parameters.Select(p =>
+        {
+            var plain = p.Name.TrimStart('@');
+            return new
+            {
+                name = plain,
+                dataType = p.DataType,
+                isOutput = p.IsOutput,
+                hasDefault = p.HasDefault,
+                isPaging = DataSourceService.PagingParameterNames.Contains(plain, StringComparer.OrdinalIgnoreCase),
+            };
+        }));
+    });
+
     // ---- internals -----------------------------------------------------------------------------
+
+    /// <summary>Save-time whitelist check (the run-time check in the data source service stays the authoritative one).</summary>
+    private async Task<bool> ProcedureAllowedAsync(DataSourceInput input, CancellationToken ct)
+    {
+        if (input.Mode != DataSourceMode.StoredProcedure) return true;
+
+        var proc = input.Definition.Procedure!; // the validator already required it
+        if (await whitelist.IsAllowedAsync(proc.Schema, proc.Name, ct)) return true;
+
+        ModelState.AddModelError("", $"Prosedur '{proc.Schema}.{proc.Name}' tidak ada di whitelist atau tidak aktif.");
+        return false;
+    }
 
     private bool TryBuildInput(DataSourceFormViewModel model, out DataSourceInput input)
     {
@@ -245,14 +292,20 @@ public class DataSourceController(
     {
         model.AllowRawQuery = options.Value.AllowRawQuery;
         model.AllowWrite = options.Value.AllowWrite;
+        model.AllowStoredProcedure = options.Value.AllowStoredProcedure;
         try
         {
             model.Tables = await schema.GetTablesAsync(ct);
+
+            var active = (await whitelist.ListAsync(ct)).Where(e => e.IsActive)
+                .Select(e => $"{e.Schema}.{e.Name}").ToHashSet(StringComparer.OrdinalIgnoreCase);
+            model.Procedures = (await schema.GetProceduresAsync(ct)).Where(p => active.Contains($"{p.Schema}.{p.Name}")).ToList();
         }
         catch (SqlException ex)
         {
-            logger.LogError(ex, "Could not list tables for the data source form.");
+            logger.LogError(ex, "Could not list tables and procedures for the data source form.");
             model.Tables = [];
+            model.Procedures = [];
             model.TablesUnavailable = true;
         }
         if (model.Id is { } id && model.Version is null)

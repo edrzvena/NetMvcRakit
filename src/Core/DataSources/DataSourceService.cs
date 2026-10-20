@@ -75,6 +75,9 @@ public sealed class DataSourceService(
 {
     public const int PreviewMaxRows = 50;
 
+    /// <summary>DS-07 parameter names the service fills from the run request; they need no mapping.</summary>
+    public static readonly IReadOnlyList<string> PagingParameterNames = ["Skip", "Take", "OrderBy", "Search", "IsCount"];
+
     public async Task<DataSourceResult> ExecuteAsync(
         Guid dataSourceId, ParameterContext context, DataSourceRunRequest? request = null, CancellationToken ct = default)
     {
