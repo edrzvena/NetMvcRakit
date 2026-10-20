@@ -10,7 +10,7 @@ public static class ModuleFieldValue
 {
     public static bool IsValid(FormFieldType type, string text) => type switch
     {
-        FormFieldType.Text or FormFieldType.Textarea => true,
+        FormFieldType.Text or FormFieldType.Textarea or FormFieldType.Select or FormFieldType.Browse => true,
         FormFieldType.Number => decimal.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out _),
         FormFieldType.Date => DateOnly.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out _),
         FormFieldType.DateTime => DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out _),
@@ -19,5 +19,12 @@ public static class ModuleFieldValue
         _ => false,
     };
 
-    public static bool IsText(FormFieldType type) => type is FormFieldType.Text or FormFieldType.Textarea;
+    /// <summary>
+    /// Types whose value is plain text for validation (MaxLength, Regex apply). A select / browse value is the lookup's
+    /// value column as text; whether it is a real choice is left to the data source, not checked here.
+    /// </summary>
+    public static bool IsText(FormFieldType type)
+        => type is FormFieldType.Text or FormFieldType.Textarea or FormFieldType.Select or FormFieldType.Browse;
+
+    public static bool IsLookup(FormFieldType type) => type is FormFieldType.Select or FormFieldType.Browse;
 }

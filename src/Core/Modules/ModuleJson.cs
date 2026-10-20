@@ -20,12 +20,16 @@ public static class ModuleJson
     public static string TypeToColumn(ModuleType type) => type switch
     {
         ModuleType.Table => "table",
+        ModuleType.Form => "form",
+        ModuleType.Page => "page",
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };
 
     public static ModuleType TypeFromColumn(string value) => value switch
     {
         "table" => ModuleType.Table,
+        "form" => ModuleType.Form,
+        "page" => ModuleType.Page,
         _ => throw new InvalidOperationException($"Unknown module type '{value}'."),
     };
 

@@ -1,6 +1,7 @@
 namespace Rakit.Core.Modules;
 
-public enum ModuleType { Table }
+/// <summary>Stored in rakit.Modules.Type as table / form / page.</summary>
+public enum ModuleType { Table, Form, Page }
 
 public enum ModuleStatus { Draft, Published }
 
@@ -26,8 +27,20 @@ public sealed class ModuleSource
     public DataSourceRef? Delete { get; set; }
 }
 
-/// <summary>Serialised camelCase: text, textarea, number, date, dateTime, boolean.</summary>
-public enum FormFieldType { Text, Textarea, Number, Date, DateTime, Boolean }
+/// <summary>Serialised camelCase: text, textarea, number, date, dateTime, boolean, select, browse.</summary>
+public enum FormFieldType { Text, Textarea, Number, Date, DateTime, Boolean, Select, Browse }
+
+/// <summary>
+/// Where the choices of a <see cref="FormFieldType.Select"/> / <see cref="FormFieldType.Browse"/> field come from: a Query
+/// data source whose result has a <see cref="ValueField"/> column (what is stored, as text) and a <see cref="TextField"/>
+/// column (what the user reads). Column names are matched case-insensitively.
+/// </summary>
+public sealed class ModuleLookup
+{
+    public Guid DataSourceId { get; set; }
+    public string ValueField { get; set; } = "";
+    public string TextField { get; set; } = "";
+}
 
 public sealed class ModuleFormField
 {
@@ -54,6 +67,16 @@ public sealed class ModuleFormField
 
     /// <summary>Shown but never accepted from the client.</summary>
     public bool Readonly { get; set; }
+
+    /// <summary>Select and browse fields only (and required for them).</summary>
+    public ModuleLookup? Lookup { get; set; }
+}
+
+/// <summary>Content of a Page module: HTML written in the builder; <c>{{module:GUID}}</c> embeds another module.</summary>
+public sealed class ModulePage
+{
+    public const int MaxHtmlLength = 200_000;
+    public string Html { get; set; } = "";
 }
 
 public sealed class ModuleForm
@@ -122,6 +145,9 @@ public sealed class ModuleConfig
     public ModuleSource Source { get; set; } = new();
     public ModuleDisplay Display { get; set; } = new();
     public ModuleForm Form { get; set; } = new();
+
+    /// <summary>Page modules only.</summary>
+    public ModulePage? Page { get; set; }
     public ModuleAccess Access { get; set; } = new();
 }
 

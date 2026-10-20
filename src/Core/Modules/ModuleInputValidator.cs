@@ -17,6 +17,7 @@ public static partial class ModuleInputValidator
     public const int MaxFormFields = 50;
     public const int MaxFieldTextLength = 4000;
     public const int MaxRegexLength = 500;
+    public const int MaxLookupFieldLength = 128;
 
     [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*$")]
     private static partial Regex FieldNamePattern();
@@ -43,14 +44,21 @@ public static partial class ModuleInputValidator
             return errors;
         }
 
-        if (input.Type == ModuleType.Table)
+        switch (input.Type)
         {
-            if (config.Source?.List is null || config.Source.List.DataSourceId == Guid.Empty)
-                errors.Add("Module Table membutuhkan data source untuk list.");
+            case ModuleType.Table:
+                if (config.Source?.List is null || config.Source.List.DataSourceId == Guid.Empty)
+                    errors.Add("Module Table membutuhkan data source untuk list.");
+                ValidateDisplay(config.Display, errors);
+                ValidateRecordActions(config, errors);
+                break;
+            case ModuleType.Form:
+                ValidateFormModule(config, errors);
+                break;
+            case ModuleType.Page:
+                ValidatePageModule(config, errors);
+                break;
         }
-
-        ValidateDisplay(config.Display, errors);
-        ValidateRecordActions(config, errors);
 
         if (config.Access?.View is { } view && view.Any(r => string.IsNullOrWhiteSpace(r) || r.Trim().Length > MaxRoleLength))
             errors.Add($"Akses view berisi entri kosong atau lebih dari {MaxRoleLength} karakter.");
@@ -111,15 +119,48 @@ public static partial class ModuleInputValidator
         if (source?.Update is not null && source.Detail is null)
             errors.Add("Update membutuhkan Detail: form ubah diisi dari data source Detail.");
 
+        if ((config.Form?.Fields.Count ?? 0) == 0 && (source?.Insert is not null || source?.Update is not null))
+            errors.Add("Insert atau Update membutuhkan setidaknya satu field form.");
+        ValidateFormFields(config, errors);
+    }
+
+    private static void ValidateFormFields(ModuleConfig config, List<string> errors)
+    {
         var fields = config.Form?.Fields ?? [];
         if (fields.Count > MaxFormFields)
             errors.Add($"Form maksimal {MaxFormFields} field.");
-        if (fields.Count == 0 && (source?.Insert is not null || source?.Update is not null))
-            errors.Add("Insert atau Update membutuhkan setidaknya satu field form.");
 
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var field in fields.Take(MaxFormFields))
             ValidateFormField(field, names, errors);
+    }
+
+    /// <summary>A Form module only inserts: an Insert (Command) source and at least one field; no list, detail, update or delete.</summary>
+    private static void ValidateFormModule(ModuleConfig config, List<string> errors)
+    {
+        var source = config.Source;
+        if (source?.Insert is null || source.Insert.DataSourceId == Guid.Empty)
+            errors.Add("Module Form membutuhkan data source Insert.");
+        if (source?.List is not null || source?.Detail is not null || source?.Update is not null || source?.Delete is not null)
+            errors.Add("Module Form hanya memakai data source Insert.");
+        if ((config.Form?.Fields.Count ?? 0) == 0)
+            errors.Add("Module Form membutuhkan setidaknya satu field form.");
+        ValidateFormFields(config, errors);
+    }
+
+    /// <summary>A Page module is HTML only (embedded modules are checked against the database by the builder).</summary>
+    private static void ValidatePageModule(ModuleConfig config, List<string> errors)
+    {
+        var source = config.Source;
+        if (source?.List is not null || source?.Detail is not null || source?.Insert is not null
+            || source?.Update is not null || source?.Delete is not null)
+            errors.Add("Module Page tidak memakai data source.");
+
+        var html = config.Page?.Html;
+        if (string.IsNullOrWhiteSpace(html))
+            errors.Add("Module Page membutuhkan isi HTML.");
+        else if (html.Length > ModulePage.MaxHtmlLength)
+            errors.Add($"Isi HTML maksimal {ModulePage.MaxHtmlLength} karakter.");
     }
 
     private static void ValidateFormField(ModuleFormField field, HashSet<string> names, List<string> errors)
@@ -149,11 +190,13 @@ public static partial class ModuleInputValidator
             return;
         }
 
+        ValidateLookup(field, name, errors);
+
         var isText = ModuleFieldValue.IsText(field.Type);
         if (field.MaxLength is { } max)
         {
             if (!isText)
-                errors.Add($"MaxLength field '{name}' hanya untuk tipe text atau textarea.");
+                errors.Add($"MaxLength field '{name}' hanya untuk tipe text, textarea, select, atau browse.");
             else if (max < 1 || max > MaxFieldTextLength)
                 errors.Add($"MaxLength field '{name}' harus antara 1 dan {MaxFieldTextLength}.");
         }
@@ -161,7 +204,7 @@ public static partial class ModuleInputValidator
         if (!string.IsNullOrEmpty(field.Regex))
         {
             if (!isText)
-                errors.Add($"Regex field '{name}' hanya untuk tipe text atau textarea.");
+                errors.Add($"Regex field '{name}' hanya untuk tipe text, textarea, select, atau browse.");
             else if (field.Regex.Length > MaxRegexLength)
                 errors.Add($"Regex field '{name}' maksimal {MaxRegexLength} karakter.");
             else if (!IsCompilable(field.Regex))
@@ -174,6 +217,31 @@ public static partial class ModuleInputValidator
                 errors.Add($"Default field '{name}' maksimal {MaxFieldTextLength} karakter.");
             else if (!ModuleFieldValue.IsValid(field.Type, field.Default))
                 errors.Add($"Default field '{name}' tidak cocok dengan tipe {field.Type.ToString().ToLowerInvariant()}.");
+        }
+    }
+
+    private static void ValidateLookup(ModuleFormField field, string name, List<string> errors)
+    {
+        var lookup = field.Lookup;
+        if (!ModuleFieldValue.IsLookup(field.Type))
+        {
+            if (lookup is not null)
+                errors.Add($"Lookup field '{name}' hanya untuk tipe select atau browse.");
+            return;
+        }
+
+        if (lookup is null || lookup.DataSourceId == Guid.Empty)
+        {
+            errors.Add($"Field '{name}' ({field.Type.ToString().ToLowerInvariant()}) membutuhkan lookup dengan data source.");
+            return;
+        }
+        foreach (var (title, value) in new[] { ("ValueField", lookup.ValueField), ("TextField", lookup.TextField) })
+        {
+            var text = value?.Trim() ?? "";
+            if (text.Length == 0)
+                errors.Add($"Lookup field '{name}': {title} wajib diisi.");
+            else if (text.Length > MaxLookupFieldLength)
+                errors.Add($"Lookup field '{name}': {title} maksimal {MaxLookupFieldLength} karakter.");
         }
     }
 

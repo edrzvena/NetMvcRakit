@@ -95,7 +95,13 @@ public static class ModuleDisplayText
 {
     public static string StatusLabel(ModuleStatus status) => status == ModuleStatus.Published ? "Published" : "Draft";
 
-    public static string TypeLabel(ModuleType type) => type == ModuleType.Table ? "Table" : type.ToString();
+    public static string TypeLabel(ModuleType type) => type switch
+    {
+        ModuleType.Table => "Table",
+        ModuleType.Form => "Form",
+        ModuleType.Page => "Page / Html",
+        _ => type.ToString(),
+    };
 
     public static string ModeLabel(DataSourceMode mode) => DataSourceDisplay.ModeLabel(mode);
 
