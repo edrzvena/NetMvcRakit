@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Rakit.Core.DataSources;
 
 namespace Rakit.Core.Modules;
 
@@ -13,6 +14,12 @@ public static partial class ModuleInputValidator
     public const int MaxFieldLength = 128;
     public const int MaxLabelLength = 200;
     public const int MaxRoleLength = 100;
+    public const int MaxFormFields = 50;
+    public const int MaxFieldTextLength = 4000;
+    public const int MaxRegexLength = 500;
+
+    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*$")]
+    private static partial Regex FieldNamePattern();
 
     public static IReadOnlyList<string> Validate(ModuleInput input)
     {
@@ -43,6 +50,7 @@ public static partial class ModuleInputValidator
         }
 
         ValidateDisplay(config.Display, errors);
+        ValidateRecordActions(config, errors);
 
         if (config.Access?.View is { } view && view.Any(r => string.IsNullOrWhiteSpace(r) || r.Trim().Length > MaxRoleLength))
             errors.Add($"Akses view berisi entri kosong atau lebih dari {MaxRoleLength} karakter.");
@@ -81,6 +89,125 @@ public static partial class ModuleInputValidator
                 errors.Add($"Label kolom '{Shorten(field)}' maksimal {MaxLabelLength} karakter.");
             if (!Enum.IsDefined(column.Format))
                 errors.Add($"Format kolom '{Shorten(field)}' tidak dikenal.");
+        }
+    }
+
+    private static void ValidateRecordActions(ModuleConfig config, List<string> errors)
+    {
+        var source = config.Source;
+        var sources = new[] { ("Detail", source?.Detail), ("Insert", source?.Insert), ("Update", source?.Update), ("Delete", source?.Delete) };
+        foreach (var (name, reference) in sources)
+        {
+            if (reference is not null && reference.DataSourceId == Guid.Empty)
+                errors.Add($"Data source untuk {name} belum dipilih.");
+        }
+
+        var keyField = config.Display?.KeyField?.Trim();
+        if (keyField is { Length: > MaxFieldLength })
+            errors.Add($"KeyField maksimal {MaxFieldLength} karakter.");
+        else if (string.IsNullOrEmpty(keyField) && (source?.Detail is not null || source?.Update is not null || source?.Delete is not null))
+            errors.Add("KeyField wajib diisi bila module punya Detail, Update, atau Delete.");
+
+        var fields = config.Form?.Fields ?? [];
+        if (fields.Count > MaxFormFields)
+            errors.Add($"Form maksimal {MaxFormFields} field.");
+        if (fields.Count == 0 && (source?.Insert is not null || source?.Update is not null))
+            errors.Add("Insert atau Update membutuhkan setidaknya satu field form.");
+
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var field in fields.Take(MaxFormFields))
+            ValidateFormField(field, names, errors);
+    }
+
+    private static void ValidateFormField(ModuleFormField field, HashSet<string> names, List<string> errors)
+    {
+        var name = field.Name?.Trim() ?? "";
+        if (name.Length == 0)
+        {
+            errors.Add("Nama field form tidak boleh kosong.");
+            return;
+        }
+        if (name.Length > MaxFieldLength || !FieldNamePattern().IsMatch(name))
+        {
+            errors.Add($"Nama field form '{Shorten(name)}' harus huruf/angka/_ (tidak diawali angka), maksimal {MaxFieldLength} karakter.");
+            return;
+        }
+        if (!names.Add(name))
+        {
+            errors.Add($"Field form '{name}' dipakai lebih dari sekali.");
+            return;
+        }
+
+        if (field.Label is { Length: > MaxLabelLength })
+            errors.Add($"Label field '{name}' maksimal {MaxLabelLength} karakter.");
+        if (!Enum.IsDefined(field.Type))
+        {
+            errors.Add($"Tipe field '{name}' tidak dikenal.");
+            return;
+        }
+
+        var isText = ModuleFieldValue.IsText(field.Type);
+        if (field.MaxLength is { } max)
+        {
+            if (!isText)
+                errors.Add($"MaxLength field '{name}' hanya untuk tipe text atau textarea.");
+            else if (max < 1 || max > MaxFieldTextLength)
+                errors.Add($"MaxLength field '{name}' harus antara 1 dan {MaxFieldTextLength}.");
+        }
+
+        if (!string.IsNullOrEmpty(field.Regex))
+        {
+            if (!isText)
+                errors.Add($"Regex field '{name}' hanya untuk tipe text atau textarea.");
+            else if (field.Regex.Length > MaxRegexLength)
+                errors.Add($"Regex field '{name}' maksimal {MaxRegexLength} karakter.");
+            else if (!IsCompilable(field.Regex))
+                errors.Add($"Regex field '{name}' tidak valid.");
+        }
+
+        if (!string.IsNullOrEmpty(field.Default))
+        {
+            if (field.Default.Length > MaxFieldTextLength)
+                errors.Add($"Default field '{name}' maksimal {MaxFieldTextLength} karakter.");
+            else if (!ModuleFieldValue.IsValid(field.Type, field.Default))
+                errors.Add($"Default field '{name}' tidak cocok dengan tipe {field.Type.ToString().ToLowerInvariant()}.");
+        }
+    }
+
+    private static bool IsCompilable(string pattern)
+    {
+        try
+        {
+            _ = new Regex(pattern, RegexOptions.CultureInvariant, ModuleFormField.RegexTimeout);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Checks the statement kind of the record action sources, which needs the data source rows: Detail must be a Query,
+    /// Insert / Update / Delete must be Commands. <paramref name="kindOf"/> returns null for an unknown data source.
+    /// The List source is checked by the caller (it has its own message).
+    /// </summary>
+    public static IReadOnlyList<string> ValidateRecordSourceKinds(ModuleSource? source, Func<Guid, StatementType?> kindOf)
+    {
+        var errors = new List<string>();
+        Check("Detail", source?.Detail, StatementType.Query);
+        Check("Insert", source?.Insert, StatementType.Command);
+        Check("Update", source?.Update, StatementType.Command);
+        Check("Delete", source?.Delete, StatementType.Command);
+        return errors;
+
+        void Check(string name, DataSourceRef? reference, StatementType expected)
+        {
+            if (reference is null || reference.DataSourceId == Guid.Empty) return;
+            if (kindOf(reference.DataSourceId) is not { } actual)
+                errors.Add($"Data source untuk {name} tidak ditemukan.");
+            else if (actual != expected)
+                errors.Add($"Data source untuk {name} harus berjenis {expected}.");
         }
     }
 
