@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Rakit.Core.DataSources;
 
 public enum DataSourceMode { Table, Query, StoredProcedure }
@@ -39,16 +41,51 @@ public sealed class TableDefinition
     public List<TableSort> Sort { get; set; } = [];
 }
 
+/// <summary>The stored procedure a data source calls. Must be whitelisted (rakit.SpWhitelist) to be saved or run.</summary>
+public sealed class ProcedureReference
+{
+    public string Schema { get; set; } = "";
+    public string Name { get; set; } = "";
+}
+
 /// <summary>Stored as JSON in rakit.DataSources.Definition.</summary>
 public sealed class DataSourceDefinition
 {
     public const int DefaultTimeoutSeconds = 30;
     public const int MaxTimeoutSeconds = 300;
 
+    /// <summary>Highest result set index a stored procedure data source can point at.</summary>
+    public const int MaxResultSetIndex = 9;
+
     public int TimeoutSeconds { get; set; } = DefaultTimeoutSeconds;
     public TableDefinition? Table { get; set; }
     public string? Query { get; set; }
+    public ProcedureReference? Procedure { get; set; }
+
+    /// <summary>Stored procedure mode: zero-based index of the result set that holds the rows.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int ListResultSet { get; set; }
+
+    /// <summary>
+    /// Stored procedure mode: result set that holds the total row count. Null = ask the procedure again with
+    /// <c>@IsCount = 1</c> when it declares that parameter.
+    /// </summary>
+    public int? CountResultSet { get; set; }
+
     public List<ParameterMapping> Parameters { get; set; } = [];
+
+    /// <summary>Drops the parts that do not belong to <paramref name="mode"/>; only the active mode's part is stored.</summary>
+    public void KeepOnlyPartFor(DataSourceMode mode)
+    {
+        if (mode != DataSourceMode.Table) Table = null;
+        if (mode != DataSourceMode.Query) Query = null;
+        if (mode != DataSourceMode.StoredProcedure)
+        {
+            Procedure = null;
+            ListResultSet = 0;
+            CountResultSet = null;
+        }
+    }
 }
 
 /// <summary>What a caller supplies to create or update a data source.</summary>

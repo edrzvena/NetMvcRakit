@@ -48,8 +48,11 @@ public static partial class DataSourceInputValidator
                 if (string.IsNullOrWhiteSpace(def.Query))
                     errors.Add("Mode Query membutuhkan teks query.");
                 break;
+            case DataSourceMode.StoredProcedure:
+                ValidateProcedure(def, errors);
+                break;
             default:
-                errors.Add("Mode Stored Procedure belum didukung.");
+                errors.Add("Mode tidak dikenal.");
                 break;
         }
 
@@ -68,5 +71,28 @@ public static partial class DataSourceInputValidator
         }
 
         return errors;
+    }
+
+    /// <summary>Whether the procedure exists and is whitelisted is checked later against the catalog and rakit.SpWhitelist.</summary>
+    private static void ValidateProcedure(DataSourceDefinition def, List<string> errors)
+    {
+        const int maxIdentifierLength = 128;
+
+        var proc = def.Procedure;
+        if (proc is null || string.IsNullOrWhiteSpace(proc.Schema) || string.IsNullOrWhiteSpace(proc.Name))
+            errors.Add("Mode Stored Procedure membutuhkan schema dan nama prosedur.");
+        else if (proc.Schema.Trim().Length > maxIdentifierLength || proc.Name.Trim().Length > maxIdentifierLength)
+            errors.Add($"Schema dan nama prosedur maksimal {maxIdentifierLength} karakter.");
+
+        if (def.ListResultSet is < 0 or > DataSourceDefinition.MaxResultSetIndex)
+            errors.Add($"Result set list harus antara 0 dan {DataSourceDefinition.MaxResultSetIndex}.");
+
+        if (def.CountResultSet is { } count)
+        {
+            if (count is < 0 or > DataSourceDefinition.MaxResultSetIndex)
+                errors.Add($"Result set count harus antara 0 dan {DataSourceDefinition.MaxResultSetIndex}.");
+            else if (count == def.ListResultSet)
+                errors.Add("Result set count tidak boleh sama dengan result set list.");
+        }
     }
 }

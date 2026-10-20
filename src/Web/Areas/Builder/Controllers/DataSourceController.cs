@@ -131,8 +131,7 @@ public class DataSourceController(
         }
 
         // Same rule as saving: only the active mode's part counts.
-        if (mode == DataSourceMode.Table) definition.Query = null;
-        else definition.Table = null;
+        definition.KeepOnlyPartFor(mode);
 
         var samples = (request.Samples ?? [])
             .ToDictionary(kv => kv.Key, kv => string.IsNullOrEmpty(kv.Value) ? null : (object?)kv.Value, StringComparer.OrdinalIgnoreCase);
@@ -219,8 +218,7 @@ public class DataSourceController(
         };
 
         // Only the active mode's part is stored.
-        if (input.Mode == DataSourceMode.Table) input.Definition.Query = null;
-        else input.Definition.Table = null;
+        input.Definition.KeepOnlyPartFor(input.Mode);
 
         var errors = DataSourceInputValidator.Validate(input);
         foreach (var e in errors) ModelState.AddModelError("", e);
