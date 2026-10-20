@@ -87,7 +87,10 @@ public static partial class ModuleInputValidator
     private static string Shorten(string text) => text.Length <= 30 ? text : text[..30] + "...";
 }
 
-/// <summary>Structural validation of a menu item; hierarchy and target existence are checked by the repository.</summary>
+/// <summary>
+/// Structural validation of a menu item; hierarchy and target existence are checked by the repository.
+/// A top-level item with neither module nor URL is a folder.
+/// </summary>
 public static partial class MenuInputValidator
 {
     public const int MaxLabelLength = 100;
@@ -116,9 +119,14 @@ public static partial class MenuInputValidator
             if (input.ModuleId is not null || hasUrl)
                 errors.Add("Delimiter tidak boleh menunjuk module atau URL.");
         }
-        else if ((input.ModuleId is null) == !hasUrl) // neither given, or both given
+        else if (input.ModuleId is not null && hasUrl)
         {
-            errors.Add("Menu harus menunjuk tepat satu: module atau URL.");
+            errors.Add("Menu hanya boleh menunjuk satu: module atau URL.");
+        }
+        else if (input.ModuleId is null && !hasUrl && input.ParentId is not null)
+        {
+            // Without a target an item is a folder (a title for a dropdown); only top-level items can be folders.
+            errors.Add("Item di dalam folder harus menunjuk module atau URL.");
         }
         else if (hasUrl && !IsSafeUrl(input.Url!.Trim()))
         {

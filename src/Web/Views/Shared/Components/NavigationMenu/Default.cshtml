@@ -1,0 +1,35 @@
+@using Rakit.Web.ViewComponents
+@model IReadOnlyList<NavEntry>
+
+@foreach (var item in Model)
+{
+    if (item.IsDelimiter)
+    {
+        <li class="nav-item d-none d-sm-block" aria-hidden="true"><span class="nav-link text-muted disabled">|</span></li>
+    }
+    else if (item.Children.Count > 0)
+    {
+        <li class="nav-item dropdown">
+            <a class="nav-link dropdown-toggle text-dark @(item.IsActive ? "active fw-semibold" : "")" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">@item.Label</a>
+            <ul class="dropdown-menu">
+                @foreach (var child in item.Children)
+                {
+                    if (child.IsDelimiter)
+                    {
+                        <li><hr class="dropdown-divider" /></li>
+                    }
+                    else
+                    {
+                        <li><a class="dropdown-item @(child.IsActive ? "active" : "")" href="@child.Href">@child.Label</a></li>
+                    }
+                }
+            </ul>
+        </li>
+    }
+    else
+    {
+        <li class="nav-item">
+            <a class="nav-link text-dark @(item.IsActive ? "active fw-semibold" : "")" href="@item.Href">@item.Label</a>
+        </li>
+    }
+}

@@ -1,0 +1,76 @@
+@model MenuIndexViewModel
+@{
+    ViewData["Title"] = "Menu";
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">Menu</h1>
+    <a class="btn btn-primary" asp-area="Builder" asp-controller="Menu" asp-action="Create">+ Menu baru</a>
+</div>
+
+@if (!string.IsNullOrEmpty(Model.Message))
+{
+    <div class="alert alert-success" role="status">@Model.Message</div>
+}
+@if (!string.IsNullOrEmpty(Model.Error))
+{
+    <div class="alert alert-danger" role="alert">@Model.Error</div>
+}
+
+<p class="text-muted">
+    Menu ini tampil di navbar. Maksimal dua tingkat: item tanpa tujuan (<em>folder</em>) menjadi dropdown berisi item di bawahnya.
+    Item hanya tampil bila aktif dan, untuk tujuan module, modulenya sudah <em>Published</em>.
+</p>
+
+@if (Model.Rows.Count == 0)
+{
+    <p class="text-muted">Belum ada menu. Buat yang pertama dengan tombol di kanan atas.</p>
+}
+else
+{
+    <table class="table table-sm table-hover align-middle">
+        <thead>
+            <tr><th>Label</th><th>Tujuan</th><th>Ikon</th><th class="text-end">Urutan</th><th>Tampil</th><th></th></tr>
+        </thead>
+        <tbody>
+            @foreach (var r in Model.Rows)
+            {
+                var m = r.Item;
+                <tr class="@(r.Hidden is null ? "" : "text-muted")">
+                    <td>
+                        <span style="padding-left: @(r.Depth * 1.5)rem">
+                            @if (r.Depth > 0) { <span aria-hidden="true">&#8627;</span> }
+                            @if (m.IsDelimiter) { <em>(pemisah)</em> } else { @m.Label }
+                        </span>
+                    </td>
+                    <td>@r.Target</td>
+                    <td>@(m.Icon ?? "-")</td>
+                    <td class="text-end">@m.Order</td>
+                    <td>
+                        @if (r.Hidden is null)
+                        {
+                            <span class="badge bg-success">Tampil</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-secondary">Tidak tampil</span>
+                            <small>@r.Hidden</small>
+                        }
+                    </td>
+                    <td class="text-end text-nowrap">
+                        @if (r.Depth == 0 && !m.IsDelimiter)
+                        {
+                            <a class="btn btn-sm btn-outline-secondary" asp-area="Builder" asp-controller="Menu" asp-action="Create" asp-route-parentId="@m.Id">+ Anak</a>
+                        }
+                        <a class="btn btn-sm btn-outline-primary" asp-area="Builder" asp-controller="Menu" asp-action="Edit" asp-route-id="@m.Id">Ubah</a>
+                        @* the label is free text: it travels in an encoded attribute, never inside a JavaScript string *@
+                        <form class="d-inline" method="post" asp-area="Builder" asp-controller="Menu" asp-action="Delete" asp-route-id="@m.Id"
+                              data-confirm="Hapus menu @(m.IsDelimiter ? "(pemisah)" : m.Label)?" onsubmit="return confirm(this.dataset.confirm);">
+                            <button type="submit" class="btn btn-sm btn-outline-danger">Hapus</button>
+                        </form>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
