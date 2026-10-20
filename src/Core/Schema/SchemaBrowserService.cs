@@ -89,6 +89,14 @@ ORDER BY s.name, o.name";
         return new ProcedureDetail(target.Schema, target.Name, parameters, columns, warning);
     }
 
+    public async Task<IReadOnlyList<ProcedureParameter>> GetProcedureParametersAsync(string schema, string name, CancellationToken ct = default)
+    {
+        await using var conn = await connections.CreateMetadataAsync(ct);
+        var target = await ResolveAsync(conn, schema, name, isProcedure: true, ct);
+        var definition = await ReadDefinitionAsync(conn, target.ObjectId, ct);
+        return await ReadParametersAsync(conn, target.ObjectId, definition, ct);
+    }
+
     // ---- helpers -------------------------------------------------------------------------------
 
     private sealed record ResolvedObject(int ObjectId, string Schema, string Name);

@@ -15,4 +15,13 @@ public interface ISchemaBrowserService
     /// <exception cref="SchemaAccessDeniedException">schema is not allowed.</exception>
     /// <exception cref="SchemaObjectNotFoundException">no such procedure, or a system procedure (sp_*, xp_*).</exception>
     Task<ProcedureDetail> GetProcedureDetailAsync(string schema, string name, CancellationToken ct = default);
+
+    /// <summary>
+    /// Parameters only (no result set discovery), cheap enough to call before every execution.
+    /// Names include the leading @; <see cref="ProcedureParameter.MaxLength"/> is in bytes, -1 for max.
+    /// </summary>
+    /// <exception cref="ArgumentException">schema or name is null/blank.</exception>
+    /// <exception cref="SchemaAccessDeniedException">schema is not allowed.</exception>
+    /// <exception cref="SchemaObjectNotFoundException">no such procedure, or a system procedure (sp_*, xp_*).</exception>
+    Task<IReadOnlyList<ProcedureParameter>> GetProcedureParametersAsync(string schema, string name, CancellationToken ct = default);
 }

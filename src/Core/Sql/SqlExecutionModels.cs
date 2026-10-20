@@ -13,6 +13,12 @@ public sealed record SqlExecOptions
 
     /// <summary><see cref="StatementType.Query"/> returns rows; <see cref="StatementType.Command"/> returns rows affected.</summary>
     public StatementType StatementType { get; init; } = StatementType.Query;
+
+    /// <summary>
+    /// Procedures only: run inside a transaction that is always rolled back (builder preview), so a procedure that
+    /// writes leaves nothing behind. Not honoured by <see cref="ISqlExecutionService.ExecuteQueryAsync"/>.
+    /// </summary>
+    public bool RollbackAfter { get; init; }
 }
 
 public sealed record DataTableResult(
