@@ -1,0 +1,42 @@
+@model Rakit.Core.Modules.Module
+@{
+    ViewData["Title"] = Model.Name;
+}
+
+<h1 class="h3 mb-1">@Model.Name</h1>
+@if (!string.IsNullOrWhiteSpace(Model.Description))
+{
+    <p class="text-muted">@Model.Description</p>
+}
+
+<div id="object-page" data-url="@Url.Action("Data", "Page", new { area = "Object", moduleId = Model.Id })"
+     data-take="@Model.Config.Display.Take" data-max-take="@Model.Config.Display.MaxTake">
+    <form id="search-form" class="row g-2 mb-3" role="search">
+        <div class="col-sm-6 col-md-4">
+            <label class="visually-hidden" for="search-input">Cari</label>
+            <input type="search" class="form-control form-control-sm" id="search-input" placeholder="Cari..." maxlength="255" autocomplete="off" />
+        </div>
+        <div class="col-auto">
+            <button type="submit" class="btn btn-sm btn-primary">Cari</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="search-clear">Reset</button>
+        </div>
+    </form>
+
+    <div id="page-status" class="small text-muted mb-2" role="status" aria-live="polite">Memuat...</div>
+    <div id="page-error" class="alert alert-danger d-none" role="alert"></div>
+    <div id="grid" class="table-responsive"></div>
+
+    <div id="pager" class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-2">
+        <div id="pager-info" class="small text-muted"></div>
+        <div class="d-flex align-items-center gap-2">
+            <label class="small text-muted mb-0" for="page-size">Per halaman</label>
+            <select id="page-size" class="form-select form-select-sm w-auto"></select>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="page-prev">&laquo; Sebelumnya</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="page-next">Berikutnya &raquo;</button>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="~/js/object-page.js" asp-append-version="true"></script>
+}

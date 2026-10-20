@@ -218,7 +218,8 @@ public class ModuleController(
 
         return Json(new ModulePreviewResponse(
             result.Columns.Select(c => new PreviewColumn(c.Field, c.Label, c.Sortable, ModuleDisplayText.FormatName(c.Format))).ToList(),
-            result.Rows.Select(r => (IReadOnlyList<string?>)r.Select(PreviewFormat.Cell).ToList()).ToList(),
+            result.Rows.Select(r => (IReadOnlyList<string?>)r
+                .Select((value, i) => ModuleCellFormatter.Format(value, result.Columns[i].Format)).ToList()).ToList(),
             result.TotalCount, result.Skip, result.Take, result.HasNext, result.OrderBy));
     });
 

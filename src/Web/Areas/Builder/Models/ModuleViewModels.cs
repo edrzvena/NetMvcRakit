@@ -63,7 +63,7 @@ public sealed class ModulePreviewRequest
 
 public sealed record PreviewColumn(string Field, string Label, bool Sortable, string Format);
 
-/// <summary>Cells are shown as text exactly like the data source preview; column formats are the page's job.</summary>
+/// <summary>Cells are formatted with the same <see cref="ModuleCellFormatter"/> as the runtime page, so the preview looks like the page.</summary>
 public sealed record ModulePreviewResponse(
     IReadOnlyList<PreviewColumn> Columns,
     IReadOnlyList<IReadOnlyList<string?>> Rows,

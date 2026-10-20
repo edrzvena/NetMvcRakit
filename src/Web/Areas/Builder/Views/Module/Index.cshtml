@@ -43,6 +43,7 @@ else
                         <a class="btn btn-sm btn-outline-primary" asp-area="Builder" asp-controller="Module" asp-action="Edit" asp-route-id="@m.Id">Ubah</a>
                         @if (published)
                         {
+                            <a class="btn btn-sm btn-outline-info" target="_blank" rel="noopener" asp-area="Object" asp-controller="Page" asp-action="Index" asp-route-moduleId="@m.Id">Buka</a>
                             <form class="d-inline" method="post" asp-area="Builder" asp-controller="Module" asp-action="Unpublish" asp-route-id="@m.Id">
                                 <button type="submit" class="btn btn-sm btn-outline-warning">Unpublish</button>
                             </form>
