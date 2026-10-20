@@ -107,6 +107,22 @@
 
     $('add-column').addEventListener('click', () => { columns.push({ field: '', label: '', visible: true, sortable: false, format: 'text' }); renderColumns(); });
 
+    // ---- module type: what is shown depends on the Tipe (elements carry data-types="table form") ----
+    const typeInput = $('Type');
+    const currentType = () => (typeInput.value || 'Table').toLowerCase();
+    function applyType() {
+        const type = currentType();
+        document.querySelectorAll('[data-types]').forEach((node) => {
+            node.classList.toggle('d-none', !node.dataset.types.toLowerCase().split(/\s+/).includes(type));
+        });
+        $('DataSourceId').required = type === 'table'; // a hidden required select would block the submit
+        const title = $('record-sources-title');
+        if (title) title.textContent = type === 'form' ? title.dataset.titleForm : title.dataset.titleTable;
+        const active = document.querySelector('.nav-tabs .nav-link.active');
+        if (active && active.closest('li').classList.contains('d-none')) $('tab-source').click(); // never stay on a tab that just disappeared
+    }
+    typeInput.addEventListener('change', applyType);
+
     // ---- form fields editor ----
     function renderFields() {
         const host = $('fields');
@@ -384,4 +400,5 @@
 
     renderColumns();
     renderFields();
+    applyType();
 })();

@@ -32,7 +32,14 @@ public class PageController(
     {
         try
         {
-            return View(await runtime.GetModuleAsync(moduleId, allowDraft: false, ct));
+            var module = await runtime.GetModuleAsync(moduleId, allowDraft: false, ct);
+            ViewData["WriteEnabled"] = dbOptions.Value.AllowWrite;
+            return module.Type switch
+            {
+                ModuleType.Table => View(module),
+                ModuleType.Form => View("FormPage", module),
+                _ => NotFound(), // Page modules get their own view with the Page task
+            };
         }
         catch (ModuleNotFoundException)
         {

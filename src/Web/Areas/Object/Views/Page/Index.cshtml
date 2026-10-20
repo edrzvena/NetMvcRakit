@@ -84,35 +84,7 @@
 
 @if (hasBrowse)
 {
-    @* Picker of a browse field. The add/edit modal hides while it is open and comes back when it closes. *@
-    <div class="modal fade" id="lookup-modal" tabindex="-1" aria-labelledby="lookup-title" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-scrollable">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h2 class="modal-title h5" id="lookup-title">Pilih data</h2>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Tutup"></button>
-                </div>
-                <div class="modal-body">
-                    <form id="lookup-form" class="d-flex gap-2 mb-2" role="search">
-                        <label class="visually-hidden" for="lookup-q">Cari</label>
-                        <input type="search" class="form-control form-control-sm" id="lookup-q" placeholder="Cari..." maxlength="255" autocomplete="off" />
-                        <button type="submit" class="btn btn-sm btn-primary">Cari</button>
-                    </form>
-                    <div id="lookup-alert" class="alert alert-danger d-none" role="alert"></div>
-                    <div id="lookup-status" class="small text-muted mb-2" role="status" aria-live="polite"></div>
-                    <div id="lookup-list" class="list-group"></div>
-                </div>
-                <div class="modal-footer justify-content-between">
-                    <div id="lookup-info" class="small text-muted"></div>
-                    <div class="d-flex gap-2">
-                        <button type="button" class="btn btn-sm btn-outline-secondary" id="lookup-prev">&laquo; Sebelumnya</button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" id="lookup-next">Berikutnya &raquo;</button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Batal</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
+    <partial name="_LookupModal" />
 }
 
 @if (hasDelete)
@@ -138,5 +110,6 @@
 }
 
 @section Scripts {
+    <script src="~/js/record-form.js" asp-append-version="true"></script>
     <script src="~/js/object-page.js" asp-append-version="true"></script>
 }

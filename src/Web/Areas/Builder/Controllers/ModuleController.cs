@@ -44,7 +44,7 @@ public class ModuleController(
         var module = await modules.GetAsync(id, ct);
         if (module is null) return NotFound();
 
-        var problem = await ListSourceProblemAsync(module.Config.Source.List?.DataSourceId, ct)
+        var problem = (module.Type == ModuleType.Table ? await ListSourceProblemAsync(module.Config.Source.List?.DataSourceId, ct) : null)
             ?? (await RecordSourceProblemsAsync(module.Config, ct)).FirstOrDefault();
         if (problem is not null)
         {
@@ -148,7 +148,7 @@ public class ModuleController(
         if (module is null) return NotFound();
         var model = new ModuleFormViewModel
         {
-            Id = module.Id, Name = module.Name, Description = module.Description, GroupId = module.GroupId,
+            Id = module.Id, Name = module.Name, Type = module.Type, Description = module.Description, GroupId = module.GroupId,
             DataSourceId = module.Config.Source.List?.DataSourceId, Status = module.Status,
             DetailDataSourceId = module.Config.Source.Detail?.DataSourceId,
             InsertDataSourceId = module.Config.Source.Insert?.DataSourceId,
@@ -163,6 +163,9 @@ public class ModuleController(
     public Task<IActionResult> Edit(Guid id, ModuleFormViewModel model, CancellationToken ct) => GuardAsync(async () =>
     {
         model.Id = id;
+        var existing = await modules.GetAsync(id, ct);
+        if (existing is null) return NotFound();
+        model.Type = existing.Type; // the type is chosen at creation and never changes
         var input = await BuildInputAsync(model, ct);
         if (input is not null)
         {
@@ -270,18 +273,21 @@ public class ModuleController(
         }
 
         // Every data source comes from the selects (never from ConfigJson); Display, Form and Access come from ConfigJson.
-        config.Source = new ModuleSource
-        {
-            List = Ref(model.DataSourceId),
-            Detail = Ref(model.DetailDataSourceId),
-            Insert = Ref(model.InsertDataSourceId),
-            Update = Ref(model.UpdateDataSourceId),
-            Delete = Ref(model.DeleteDataSourceId),
-        };
+        // A Form module only inserts, so only the Insert select counts for it.
+        config.Source = model.Type == ModuleType.Form
+            ? new ModuleSource { Insert = Ref(model.InsertDataSourceId) }
+            : new ModuleSource
+            {
+                List = Ref(model.DataSourceId),
+                Detail = Ref(model.DetailDataSourceId),
+                Insert = Ref(model.InsertDataSourceId),
+                Update = Ref(model.UpdateDataSourceId),
+                Delete = Ref(model.DeleteDataSourceId),
+            };
         var input = new ModuleInput
         {
             Name = model.Name?.Trim() ?? "",
-            Type = ModuleType.Table,
+            Type = model.Type,
             Description = string.IsNullOrWhiteSpace(model.Description) ? null : model.Description.Trim(),
             GroupId = model.GroupId,
             Config = config,
@@ -292,7 +298,7 @@ public class ModuleController(
         if (errors.Count > 0) return null;
 
         // The module only stores the data source's id, so this is where a wrong or unsuitable one is caught.
-        if (await ListSourceProblemAsync(model.DataSourceId, ct) is { } problem)
+        if (model.Type == ModuleType.Table && await ListSourceProblemAsync(model.DataSourceId, ct) is { } problem)
         {
             ModelState.AddModelError("", problem);
             return null;
@@ -377,7 +383,7 @@ public class ModuleController(
         model.DataSources = queryDataSources
             .Select(d => new DataSourceOption(d.Id, d.Code, d.Name, ModuleDisplayText.ModeLabel(d.Mode)))
             .ToList();
-        model.DataSourceUnavailable = model.DataSourceId is { } id && queryDataSources.All(d => d.Id != id);
+        model.DataSourceUnavailable = model.Type == ModuleType.Table && model.DataSourceId is { } id && queryDataSources.All(d => d.Id != id);
 
         // A saved record-action id that is gone or has the wrong type is not in these lists; the view keeps it visible so saving reports it.
         model.CommandDataSources = allDataSources

@@ -18,6 +18,9 @@ public sealed class ModuleFormViewModel
 {
     public Guid? Id { get; set; }
     public string Name { get; set; } = "";
+
+    /// <summary>Chosen when the module is created; on edit it is always the saved type (it cannot change).</summary>
+    public ModuleType Type { get; set; } = ModuleType.Table;
     public string? Description { get; set; }
     public Guid? GroupId { get; set; }
 

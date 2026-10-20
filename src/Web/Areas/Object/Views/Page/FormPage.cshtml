@@ -1,0 +1,46 @@
+@using Rakit.Core.Modules
+@model Rakit.Core.Modules.Module
+@{
+    ViewData["Title"] = Model.Name;
+
+    // A Form module: one form that inserts a record (Insert data source), no grid. The inputs come from the configured form fields.
+    var fields = Model.Config.Form.Fields;
+    var writeEnabled = ViewData["WriteEnabled"] as bool? ?? false;
+    var hasBrowse = fields.Any(f => f.Type == FormFieldType.Browse);
+}
+
+<h1 class="h3 mb-1">@Model.Name</h1>
+@if (!string.IsNullOrWhiteSpace(Model.Description))
+{
+    <p class="text-muted">@Model.Description</p>
+}
+
+<div id="form-page" data-record-url="@Url.Action("RecordInsert", "Page", new { area = "Object", moduleId = Model.Id })"
+     data-lookup-url="@Url.Action("Lookup", "Page", new { area = "Object", moduleId = Model.Id, field = "__FIELD__" })">
+    @Html.AntiForgeryToken()
+    @if (!writeEnabled)
+    {
+        <div class="alert alert-warning" role="note">
+            Penulisan sedang dinonaktifkan (<code>Rakit:Db:AllowWrite = false</code>): form ini tidak bisa disimpan.
+        </div>
+    }
+    <div id="page-message" class="alert d-none" role="status"></div>
+    <form id="record-form" class="col-lg-7 col-xl-6" novalidate>
+        <fieldset disabled="@(!writeEnabled)">
+            <div id="record-alert" class="alert alert-danger d-none" role="alert"></div>
+            <partial name="_RecordFields" model="fields" />
+            <button type="submit" class="btn btn-primary" id="record-save">Simpan</button>
+            <button type="button" class="btn btn-outline-secondary" id="record-reset">Kosongkan</button>
+        </fieldset>
+    </form>
+</div>
+
+@if (hasBrowse)
+{
+    <partial name="_LookupModal" />
+}
+
+@section Scripts {
+    <script src="~/js/record-form.js" asp-append-version="true"></script>
+    <script src="~/js/form-page.js" asp-append-version="true"></script>
+}

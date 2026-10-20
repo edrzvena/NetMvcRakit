@@ -88,6 +88,7 @@ public sealed class ModuleRuntimeService(
         Guid moduleId, bool allowDraft, ParameterContext context, ModuleListRequest? request = null, CancellationToken ct = default)
     {
         var module = await GetModuleAsync(moduleId, allowDraft, ct);
+        if (module.Type != ModuleType.Table) throw new ModuleNotFoundException(moduleId); // Form / Page modules have no list
         return await RunListAsync(module, context, request, preview: false, ct);
     }
 
