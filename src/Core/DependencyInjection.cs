@@ -42,6 +42,7 @@ public static class DependencyInjection
         services.AddSingleton<IMenuNavigationService, MenuNavigationService>();
         services.AddSingleton<IModuleRuntimeService, ModuleRuntimeService>();
         services.AddSingleton<IModuleRecordService, ModuleRecordService>();
+        services.AddSingleton<IModuleLookupService, ModuleLookupService>();
 
         return services;
     }

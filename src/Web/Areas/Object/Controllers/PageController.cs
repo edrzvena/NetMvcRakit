@@ -19,7 +19,8 @@ namespace Rakit.Web.Areas.Object.Controllers;
 [Area("Object")]
 [Route("object/page")]
 public class PageController(
-    IModuleRuntimeService runtime, IModuleRecordService records, IOptions<RakitDbOptions> dbOptions, ILogger<PageController> logger)
+    IModuleRuntimeService runtime, IModuleRecordService records, IModuleLookupService lookups,
+    IOptions<RakitDbOptions> dbOptions, ILogger<PageController> logger)
     : Controller
 {
     private const int MaxWriteBodyBytes = 262_144;
@@ -91,6 +92,21 @@ public class PageController(
     // ---- record actions (Detail / Insert / Update / Delete) --------------------------------------------------
     // Writes are POST with the anti-forgery token (header RequestVerificationToken). Which keys and values reach a data
     // source is decided by ModuleRecordService from the module's configured form fields, never by this controller.
+
+    /// <summary>
+    /// Choices of a select / browse field: <c>_q</c> searches, <c>_skip</c> / <c>_take</c> page (a select returns up to 200
+    /// choices, a browse up to 50 per page). Same error contract as the record endpoints.
+    /// </summary>
+    [HttpGet("{moduleId:guid}/lookup/{field}")]
+    public Task<IActionResult> Lookup(Guid moduleId, string field, CancellationToken ct) => RecordAsync(async () =>
+    {
+        var query = Request.Query;
+        var result = await lookups.SearchAsync(
+            moduleId, field, await HttpParameterContext.FromAsync(HttpContext, ct),
+            new ModuleLookupRequest(ToInt(query["_skip"]), ToInt(query["_take"]), query["_q"].FirstOrDefault()), ct);
+        return Json(new ObjectLookup(
+            result.Items.Select(i => new ObjectLookupItem(i.Value, i.Text)).ToList(), result.Total, result.Skip, result.Take, result.HasNext));
+    });
 
     [HttpGet("{moduleId:guid}/record/{key}")]
     public Task<IActionResult> RecordDetail(Guid moduleId, string key, CancellationToken ct) => RecordAsync(async () =>

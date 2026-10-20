@@ -55,7 +55,6 @@ public sealed class ModuleRecordService(
     IModuleRepository modules, IDataSourceService dataSources, ILogger<ModuleRecordService> logger) : IModuleRecordService
 {
     public const int MaxKeyLength = 200;
-    private const string RouteKey = "id";
 
     private enum RecordAction { Detail, Insert, Update, Delete }
 
@@ -201,15 +200,8 @@ public sealed class ModuleRecordService(
     /// A fresh context: only the validated form values and the record key. Query string, route values and form keys of
     /// the request are not passed on; claims and the clock are.
     /// </summary>
-    private static ParameterContext Isolate(ParameterContext request, Dictionary<string, string?> form, string? key) => new()
-    {
-        Form = form,
-        Route = key is null
-            ? new Dictionary<string, string?>()
-            : new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase) { [RouteKey] = key },
-        Claims = request.Claims,
-        Now = request.Now,
-    };
+    private static ParameterContext Isolate(ParameterContext request, Dictionary<string, string?> form, string? key)
+        => ModuleContexts.Isolate(request, form, key);
 
     private static string NormalizeKey(string? key)
     {

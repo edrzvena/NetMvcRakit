@@ -26,5 +26,13 @@ public static class ModuleFieldValue
     public static bool IsText(FormFieldType type)
         => type is FormFieldType.Text or FormFieldType.Textarea or FormFieldType.Select or FormFieldType.Browse;
 
+    /// <summary>A database value as text with the invariant culture (null stays null); used for record keys and lookup values.</summary>
+    public static string? ToText(object? value) => value switch
+    {
+        null => null,
+        IFormattable f => f.ToString(null, CultureInfo.InvariantCulture),
+        _ => value.ToString(),
+    };
+
     public static bool IsLookup(FormFieldType type) => type is FormFieldType.Select or FormFieldType.Browse;
 }

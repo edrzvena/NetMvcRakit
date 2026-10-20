@@ -26,6 +26,11 @@ public sealed record ObjectActions(bool CanAdd, bool CanEdit, bool CanDelete);
 /// <summary>Field values of one record, keyed by form field name, written the way an input shows them.</summary>
 public sealed record ObjectRecord(IReadOnlyDictionary<string, string?> Values);
 
+public sealed record ObjectLookupItem(string Value, string Text);
+
+/// <summary>One page of the choices of a select / browse field. <see cref="Total"/> is null when the data source cannot count.</summary>
+public sealed record ObjectLookup(IReadOnlyList<ObjectLookupItem> Items, int? Total, int Skip, int Take, bool HasNext);
+
 /// <summary>A write went through.</summary>
 public sealed record ObjectDone(string Message);
 

@@ -163,9 +163,7 @@ public sealed class ModuleRuntimeService(
         if (index < 0) return null;
 
         return list.Rows.Take(take)
-            .Select(row => index < row.Count && row[index] is { } value
-                ? value is IFormattable f ? f.ToString(null, System.Globalization.CultureInfo.InvariantCulture) : value.ToString()
-                : null)
+            .Select(row => index < row.Count ? ModuleFieldValue.ToText(row[index]) : null)
             .ToList();
     }
 
