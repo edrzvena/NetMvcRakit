@@ -1,0 +1,110 @@
+@using Rakit.Core.Workflows
+@model TrackingIndexViewModel
+@{
+    ViewData["Title"] = "Tracking";
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">Tracking</h1>
+</div>
+<p class="small text-muted">
+    Bagaimana <a asp-area="Builder" asp-controller="Workflow" asp-action="Index">workflow</a> berjalan pada rentang tanggal (jam server).
+    Sebuah run <strong>gagal</strong> bila ada langkahnya yang gagal, <strong>menunggu</strong> bila sebuah langkah Form masih menunggu jawaban
+    pengunjung (lebih dari 30 menit = <strong>kedaluwarsa</strong>), selain itu <strong>berhasil</strong> (termasuk yang dibatalkan pengunjung).
+</p>
+
+<div id="tracking" data-url="@Url.Action("Data", "Tracking", new { area = "Builder" })"
+     data-run-url="@Url.Action("Run", "Tracking", new { area = "Builder", runId = Guid.Empty })">
+    <form id="tr-filter" class="row g-2 align-items-end mb-3">
+        <div class="col-6 col-md-2">
+            <label class="form-label small mb-1" for="tr-from">Dari</label>
+            <input type="date" class="form-control form-control-sm" id="tr-from" value="@Model.From" required />
+        </div>
+        <div class="col-6 col-md-2">
+            <label class="form-label small mb-1" for="tr-to">Sampai</label>
+            <input type="date" class="form-control form-control-sm" id="tr-to" value="@Model.To" required />
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small mb-1" for="tr-workflow">Workflow</label>
+            <select class="form-select form-select-sm" id="tr-workflow">
+                <option value="">Semua workflow</option>
+                @foreach (var w in Model.Workflows)
+                {
+                    <option value="@w.Id">@w.Name (@w.Code)</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small mb-1" for="tr-status">Status</label>
+            <select class="form-select form-select-sm" id="tr-status">
+                <option value="">Semua status</option>
+                <option value="success">Berhasil</option>
+                <option value="failed">Gagal</option>
+                <option value="waiting">Menunggu</option>
+                <option value="expired">Kedaluwarsa</option>
+            </select>
+        </div>
+        <div class="col-md-3 d-flex gap-1">
+            <button type="submit" class="btn btn-primary btn-sm" id="tr-apply">Terapkan</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" data-days="0">Hari ini</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" data-days="6">7 hari</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" data-days="29">30 hari</button>
+        </div>
+    </form>
+
+    <div id="tr-message" class="alert d-none" role="status"></div>
+
+    <div class="row g-2 mb-3" id="tr-kpi">
+        <div class="col-6 col-md"><div class="rk-card p-3"><div class="small text-muted">Total run</div><div class="h3 mb-0" id="kpi-total">-</div></div></div>
+        <div class="col-6 col-md"><div class="rk-card p-3"><div class="small text-muted">Berhasil</div><div class="h3 mb-0 text-success" id="kpi-success">-</div></div></div>
+        <div class="col-6 col-md"><div class="rk-card p-3"><div class="small text-muted">Gagal</div><div class="h3 mb-0 text-danger" id="kpi-failed">-</div></div></div>
+        <div class="col-6 col-md"><div class="rk-card p-3"><div class="small text-muted">Menunggu</div><div class="h3 mb-0" id="kpi-waiting">-</div><div class="small text-muted" id="kpi-expired"></div></div></div>
+        <div class="col-12 col-md"><div class="rk-card p-3"><div class="small text-muted">Rata-rata durasi</div><div class="h3 mb-0" id="kpi-average">-</div></div></div>
+    </div>
+
+    <div class="mb-3" id="tr-chart" aria-live="polite"></div>
+
+    <div class="table-responsive border rounded">
+        <table class="table table-sm table-hover align-middle mb-0">
+            <thead>
+                <tr><th>Mulai</th><th>Workflow</th><th>Tombol</th><th>Oleh</th><th class="text-end">Langkah</th><th class="text-end">Durasi (ms)</th><th>Status</th><th></th></tr>
+            </thead>
+            <tbody id="tr-rows"></tbody>
+        </table>
+    </div>
+    <div class="d-flex justify-content-between align-items-center mt-2">
+        <span class="small text-muted" id="tr-count"></span>
+        <div class="btn-group btn-group-sm" role="group" aria-label="Halaman">
+            <button type="button" class="btn btn-outline-secondary" id="tr-prev" disabled>&laquo; Sebelumnya</button>
+            <span class="btn btn-outline-secondary disabled" id="tr-page">1 / 1</span>
+            <button type="button" class="btn btn-outline-secondary" id="tr-next" disabled>Berikutnya &raquo;</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="tr-modal" tabindex="-1" aria-labelledby="tr-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title h5" id="tr-modal-title">Rincian run</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Tutup"></button>
+            </div>
+            <div class="modal-body">
+                <div id="tr-modal-alert" class="alert alert-danger d-none" role="alert"></div>
+                <table class="table table-sm align-middle mb-0">
+                    <thead><tr><th>Jam</th><th>Langkah</th><th>Status</th><th>Pesan</th><th class="text-end">ms</th></tr></thead>
+                    <tbody id="tr-modal-rows"></tbody>
+                </table>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Tutup</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="~/lib/chart.js/chart.umd.min.js"></script>
+    <script src="~/js/chart-render.js" asp-append-version="true"></script>
+    <script src="~/js/tracking.js" asp-append-version="true"></script>
+}

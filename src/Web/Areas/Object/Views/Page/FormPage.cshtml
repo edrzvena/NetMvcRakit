@@ -17,6 +17,7 @@
 
 <div id="form-page" data-record-url="@Url.Action("RecordInsert", "Page", new { area = "Object", moduleId = Model.Id })"
      data-action-url="@Url.Action("RunAction", "Page", new { area = "Object", moduleId = Model.Id, code = "__CODE__" })"
+     data-resume-url="@Url.Action("ResumeAction", "Page", new { area = "Object", moduleId = Model.Id, runId = Guid.Empty })"
      data-lookup-url="@Url.Action("Lookup", "Page", new { area = "Object", moduleId = Model.Id, field = "__FIELD__" })">
     @Html.AntiForgeryToken()
     @if (!writeEnabled)

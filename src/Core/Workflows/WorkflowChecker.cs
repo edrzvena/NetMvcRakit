@@ -22,7 +22,7 @@ public interface IWorkflowChecker
 
 public sealed class WorkflowChecker(
     IDataSourceRepository dataSources, IModuleRepository modules, IOptions<RakitDbOptions> db,
-    IOptions<WorkflowOptions> workflowOptions, IOptions<MailOptions> mail) : IWorkflowChecker
+    IOptions<WorkflowOptions> workflowOptions, IOptions<MailOptions> mail, IWorkflowScriptEngine scripts) : IWorkflowChecker
 {
     public async Task<IReadOnlyList<WorkflowIssue>> CheckAsync(
         IReadOnlyList<WorkflowStep> steps, bool transaction = false, CancellationToken ct = default)
@@ -109,6 +109,19 @@ public sealed class WorkflowChecker(
                 case StepType.Condition when step.Condition is { } condition:
                     CheckTemplates(label, [condition.Left, condition.Right], before, index, issues);
                     break;
+                case StepType.Javascript when step.Script is { } script:
+                {
+                    if (!string.IsNullOrWhiteSpace(script.Source) && scripts.CheckSyntax(script.Source) is { } syntax)
+                        issues.Add(new WorkflowIssue(true, $"{label}: skrip tidak valid: {syntax}"));
+                    break;
+                }
+                case StepType.Action when step.Action is { } action:
+                {
+                    CheckTemplates(label, [action.Title, action.Intro], before, index, issues);
+                    if (action.Buttons.Count > 0 && action.Buttons.All(b => b.Cancel) && !string.IsNullOrWhiteSpace(step.Next))
+                        issues.Add(new WorkflowIssue(false, $"{label}: semua tombolnya mengakhiri workflow, jadi langkah sesudahnya tidak pernah dijalankan."));
+                    break;
+                }
             }
         }
 
@@ -151,6 +164,8 @@ public sealed class WorkflowChecker(
             StepType.DataSource => (kind == "return" && parts.Length == 2) || (kind is "out" or "row" && parts.Length == 3 && parts[2].Length > 0),
             StepType.Rest => (kind is "status" or "body" && parts.Length == 2) || (kind == "json" && parts.Length == 3 && parts[2].Length > 0),
             StepType.Email => kind == "sent" && parts.Length == 2,
+            StepType.Javascript => (kind == "body" && parts.Length == 2) || (kind == "json" && parts.Length == 3 && parts[2].Length > 0),
+            StepType.Action => (kind == "button" && parts.Length == 2) || (kind == "form" && parts.Length == 3 && parts[2].Length > 0),
             _ => false,
         };
         if (ok) return;
@@ -160,6 +175,8 @@ public sealed class WorkflowChecker(
             StepType.DataSource => $"'{from}.return', '{from}.out.NamaParameter', atau '{from}.row.NamaKolom'",
             StepType.Rest => $"'{from}.status', '{from}.body', atau '{from}.json.jalur'",
             StepType.Email => $"'{from}.sent'",
+            StepType.Javascript => $"'{from}.body' atau '{from}.json.jalur'",
+            StepType.Action => $"'{from}.button' atau '{from}.form.NamaField'",
             _ => "",
         };
         issues.Add(new WorkflowIssue(true, shapes.Length == 0

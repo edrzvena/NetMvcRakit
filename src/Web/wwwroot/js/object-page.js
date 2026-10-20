@@ -425,6 +425,16 @@
     }
 
     // ---- workflow buttons: toolbar ones (data-action) and per-row ones (rowActions) run a workflow on the server ----
+    // A workflow that reaches an Action step answers with a form (display.kind "form"); its buttons come back through env.
+    const actionEnv = {
+        resumeUrl: root.dataset.resumeUrl,
+        send: rf.send,
+        failureText: rf.failureText,
+        onDone: (data) => {
+            showMessage(data.message || 'Aksi dijalankan.', true);
+            load();
+        },
+    };
     async function runAction(action, key, button) {
         if (action.confirm && !window.confirm(action.confirm)) return;
         clearMessage();
@@ -434,8 +444,13 @@
         const res = await rf.send('POST', url);
         if (button) button.disabled = false;
         if (res.ok) {
+            const display = res.data && res.data.display;
+            if (display && display.kind === 'form' && window.RakitActionResult) {
+                window.RakitActionResult.show(display, actionEnv); // the message and the reload come when the form is answered
+                return;
+            }
             showMessage((res.data && res.data.message) || 'Aksi dijalankan.', true);
-            if (window.RakitActionResult && window.RakitActionResult.show(res.data && res.data.display)) { /* a page or another module is shown */ }
+            if (window.RakitActionResult && window.RakitActionResult.show(display)) { /* a page or another module is shown */ }
             load(); // the workflow may have changed the data
         } else {
             showMessage(rf.failureText(res), false);

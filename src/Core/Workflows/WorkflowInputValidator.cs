@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Rakit.Core.Modules;
 
 namespace Rakit.Core.Workflows;
 
@@ -23,6 +24,9 @@ public static partial class WorkflowInputValidator
     // no '-' or '.': the step code is the first part of a placeholder key ("create.row.Id")
     [GeneratedRegex(@"^[A-Za-z][A-Za-z0-9_]{0,49}$")]
     private static partial Regex StepCodePattern();
+
+    [GeneratedRegex(@"^[A-Za-z][A-Za-z0-9_]{0,29}$")]
+    private static partial Regex ButtonCodePattern();
 
     [GeneratedRegex(@"^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,100}$")]
     private static partial Regex HeaderNamePattern();
@@ -102,6 +106,9 @@ public static partial class WorkflowInputValidator
             }
         }
 
+        if (input.Transaction && steps.Any(s => s.Type == StepType.Action))
+            errors.Add("Langkah Form (Action) tidak bisa dipakai bersama opsi satu transaksi: transaksi tidak bisa terbuka sampai pengunjung menjawab.");
+
         if (errors.Count == 0 && WorkflowGraph.HasCycle(steps))
             errors.Add("Langkah-langkah saling berputar (loop): sebuah langkah akhirnya kembali ke langkah sebelumnya.");
 
@@ -131,6 +138,53 @@ public static partial class WorkflowInputValidator
             case StepType.Condition:
                 ValidateCondition(step.Condition, label, errors);
                 break;
+            case StepType.Javascript:
+                ValidateScript(step.Script, label, errors);
+                break;
+            case StepType.Action:
+                ValidateAction(step.Action, label, errors);
+                break;
+        }
+    }
+
+    private static void ValidateScript(ScriptStepConfig? script, string label, List<string> errors)
+    {
+        if (script is null || string.IsNullOrWhiteSpace(script.Source)) errors.Add($"{label}: skrip wajib diisi.");
+        else if (script.Source.Length > ScriptStepConfig.MaxLength) errors.Add($"{label}: skrip maksimal {ScriptStepConfig.MaxLength} karakter.");
+    }
+
+    private static void ValidateAction(ActionStepConfig? action, string label, List<string> errors)
+    {
+        if (action is null)
+        {
+            errors.Add($"{label}: pengaturan Form wajib ada.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(action.Title)) errors.Add($"{label}: judul form wajib diisi.");
+        else if (action.Title.Trim().Length > ActionStepConfig.MaxTitleLength) errors.Add($"{label}: judul form maksimal {ActionStepConfig.MaxTitleLength} karakter.");
+        if (action.Intro is { Length: > ActionStepConfig.MaxIntroLength }) errors.Add($"{label}: teks pengantar maksimal {ActionStepConfig.MaxIntroLength} karakter.");
+
+        var fields = action.Fields ?? [];
+        if (fields.Count > ActionStepConfig.MaxFields) errors.Add($"{label}: maksimal {ActionStepConfig.MaxFields} field.");
+        else foreach (var message in ModuleInputValidator.ValidateStandaloneFields(fields)) errors.Add($"{label}: {message}");
+
+        var buttons = action.Buttons ?? [];
+        if (buttons.Count == 0) errors.Add($"{label}: form membutuhkan setidaknya satu tombol.");
+        else if (buttons.Count > ActionStepConfig.MaxButtons) errors.Add($"{label}: maksimal {ActionStepConfig.MaxButtons} tombol.");
+
+        var codes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var button in buttons.Take(ActionStepConfig.MaxButtons))
+        {
+            var code = button.Code?.Trim() ?? "";
+            if (!ButtonCodePattern().IsMatch(code)) errors.Add($"{label}: kode tombol '{code}' harus 1-{ActionButton.MaxCodeLength} karakter: huruf, angka, '_', diawali huruf.");
+            else if (!codes.Add(code)) errors.Add($"{label}: kode tombol '{code}' dipakai lebih dari sekali.");
+
+            var text = button.Label?.Trim() ?? "";
+            if (text.Length == 0) errors.Add($"{label}: tombol '{code}' membutuhkan label.");
+            else if (text.Length > ActionButton.MaxLabelLength) errors.Add($"{label}: label tombol '{code}' maksimal {ActionButton.MaxLabelLength} karakter.");
+            if (!string.IsNullOrWhiteSpace(button.Style) && !ModuleAction.Styles.Contains(button.Style.Trim(), StringComparer.OrdinalIgnoreCase))
+                errors.Add($"{label}: warna tombol '{code}' harus salah satu dari {string.Join(", ", ModuleAction.Styles)}.");
         }
     }
 

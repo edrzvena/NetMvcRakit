@@ -48,6 +48,7 @@
             </div>
             <div class="form-text">
                 Bila salah satu langkah gagal, semua perubahan langkah data source dibatalkan (rollback). Langkah Rest dan Email tidak bisa dibatalkan.
+                Tidak bisa dipakai bersama langkah <em>Form</em> (alur berhenti menunggu pengunjung).
             </div>
         </div>
     </div>
@@ -74,6 +75,8 @@
             <button type="button" class="btn btn-sm btn-outline-secondary" data-add="condition">Kondisi</button>
             <button type="button" class="btn btn-sm btn-outline-secondary" data-add="page">Halaman</button>
             <button type="button" class="btn btn-sm btn-outline-secondary" data-add="module">Module</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-add="javascript" title="Skrip JavaScript yang dijalankan di server">Skrip</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-add="action" title="Berhenti dan tampilkan form ke pengunjung">Form</button>
             <span class="mx-2 text-muted">|</span>
             <button type="button" class="btn btn-sm btn-outline-secondary" id="wf-layout">Rapikan</button>
             <button type="button" class="btn btn-sm btn-outline-info" id="check-steps">Periksa</button>
@@ -133,7 +136,7 @@
                                 <td><code>@(h.RunId.ToString()[..8])</code></td>
                                 <td>@(string.IsNullOrWhiteSpace(h.StepName) ? h.StepCode : h.StepName) <span class="text-muted">(@h.StepCode)</span></td>
                                 <td>
-                                    <span class="badge @(h.Status == TrackingStatus.Success ? "bg-success" : h.Status == TrackingStatus.Failed ? "bg-danger" : h.Status == TrackingStatus.RolledBack ? "bg-warning text-dark" : "bg-secondary")">@WorkflowDisplayText.TrackingLabel(h.Status)</span>
+                                    <span class="badge @(h.Status == TrackingStatus.Success ? "bg-success" : h.Status == TrackingStatus.Failed ? "bg-danger" : h.Status == TrackingStatus.RolledBack ? "bg-warning text-dark" : h.Status == TrackingStatus.Waiting ? "bg-info text-dark" : "bg-secondary")">@WorkflowDisplayText.TrackingLabel(h.Status)</span>
                                 </td>
                                 <td>@h.Message</td>
                                 <td class="text-end">@h.DurationMs</td>
@@ -148,5 +151,6 @@
 }
 
 @section Scripts {
+    <script src="~/lib/ace/ace.js"></script>
     <script src="~/js/workflow-form.js" asp-append-version="true"></script>
 }

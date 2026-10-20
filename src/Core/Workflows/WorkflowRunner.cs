@@ -31,8 +31,15 @@ public enum WorkflowFailureKind
 /// <param name="Message">Safe to show to end users: why the step failed, or a note about a successful one (e.g. an email that was only logged).</param>
 public sealed record WorkflowStepResult(string Code, string Name, TrackingStatus Status, string? Message, int DurationMs);
 
-/// <summary>What the visitor's browser should do after a successful run: <c>html</c> (show sanitized HTML) or <c>module</c> (go to the URL).</summary>
-public sealed record WorkflowDisplay(string Kind, string? Html, string? Url);
+/// <summary>
+/// What the visitor's browser should do after a successful run: <c>html</c> (show sanitized HTML), <c>module</c> (go to the URL)
+/// or <c>form</c> (show the Action step's <see cref="Prompt"/>; the run waits for a button).
+/// </summary>
+public sealed record WorkflowDisplay(string Kind, string? Html, string? Url, WorkflowPrompt? Prompt = null);
+
+/// <summary>The form of an Action step as the visitor sees it (title and intro already have their placeholders filled in).</summary>
+public sealed record WorkflowPrompt(
+    Guid RunId, string Title, string? Intro, IReadOnlyList<ModuleFormField> Fields, IReadOnlyList<ActionButton> Buttons);
 
 /// <param name="RolledBack">The workflow's SQL transaction was rolled back (a step failed), undoing its earlier database steps.</param>
 public sealed record WorkflowRunResult(
@@ -59,11 +66,24 @@ public interface IWorkflowRunner
     /// </summary>
     /// <exception cref="WorkflowNotFoundException">No such workflow, deleted, or still a draft.</exception>
     Task<WorkflowRunResult> RunAsync(Guid workflowId, WorkflowRunContext context, CancellationToken ct = default);
+
+    /// <summary>
+    /// Goes on with a run that an Action step paused, after the visitor pressed <paramref name="buttonCode"/>. The values are
+    /// validated with the Action's field rules (a cancel button needs none) and the run goes on from the step after the Action
+    /// under the same <c>RunId</c>; a cancel button ends it as a success. The result can be another form (a second Action step).
+    /// </summary>
+    /// <exception cref="WorkflowRunNotFoundException">
+    /// The run does not exist, belongs to another module, expired, was already used, or its workflow is gone or not published.
+    /// </exception>
+    /// <exception cref="ModuleRecordValidationException">A value is invalid or the button is unknown; the run stays pending.</exception>
+    Task<WorkflowRunResult> ResumeAsync(
+        Guid runId, Guid? moduleId, string buttonCode, IReadOnlyDictionary<string, string?> submitted, CancellationToken ct = default);
 }
 
 public sealed class WorkflowRunner(
     IWorkflowRepository workflows, IDataSourceService dataSources, ISqlExecutionService sql, IRestCaller rest,
-    IWorkflowEmailSender email, IModuleLinkResolver moduleLinks, ILogger<WorkflowRunner> logger) : IWorkflowRunner
+    IWorkflowEmailSender email, IModuleLinkResolver moduleLinks, IWorkflowScriptEngine scripts, IWorkflowRunStore runStore,
+    ILogger<WorkflowRunner> logger) : IWorkflowRunner
 {
     private const string GenericUnavailable = "Aksi ini tidak tersedia saat ini.";
 
@@ -90,14 +110,72 @@ public sealed class WorkflowRunner(
         var workflow = await workflows.GetAsync(workflowId, ct);
         if (workflow is null || workflow.Status != WorkflowStatus.Published) throw new WorkflowNotFoundException(workflowId);
 
-        var runId = Guid.NewGuid();
         var values = new WorkflowValues(context.Form, context.Key, context.Request.Claims, context.Request.Now);
+        var first = workflow.Steps.Count > 0 ? workflow.Steps[0] : null;
+        return await ContinueAsync(workflow, Guid.NewGuid(), context, values, first, [], ct);
+    }
+
+    public async Task<WorkflowRunResult> ResumeAsync(
+        Guid runId, Guid? moduleId, string buttonCode, IReadOnlyDictionary<string, string?> submitted, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(submitted);
+        var pending = await runStore.GetPendingAsync(runId, ct) ?? throw new WorkflowRunNotFoundException(runId);
+        if (pending.ModuleId != moduleId) throw new WorkflowRunNotFoundException(runId);
+
+        var workflow = await workflows.GetAsync(pending.WorkflowId, ct);
+        if (workflow is null || workflow.Status != WorkflowStatus.Published) throw new WorkflowRunNotFoundException(runId);
+        var step = workflow.Steps.FirstOrDefault(s => s.Type == StepType.Action && s.Code.Equals(pending.StepCode, StringComparison.OrdinalIgnoreCase));
+        if (step?.Action is not { } action) throw new WorkflowRunNotFoundException(runId);
+
+        var code = buttonCode?.Trim() ?? "";
+        var button = action.Buttons.FirstOrDefault(b => b.Code.Equals(code, StringComparison.OrdinalIgnoreCase))
+            ?? throw new ModuleRecordValidationException(new Dictionary<string, string> { [""] = "Tombol tidak dikenal." });
+
+        // A cancel button needs no valid values. Invalid values leave the run pending so the visitor can correct them.
+        var form = button.Cancel
+            ? new Dictionary<string, string?>()
+            : ModuleRecordService.ValidateFields(action.Fields, submitted, forInsert: true);
+
+        if (!await runStore.ClaimAsync(runId, ct)) throw new WorkflowRunNotFoundException(runId);
+
+        var state = WorkflowJson.DeserializeData<WorkflowRunState>(pending.State) ?? new WorkflowRunState();
+        var values = new WorkflowValues(state.Form, state.Key, state.Claims, state.Now);
+        foreach (var (key, value) in state.Outputs) values.Outputs[key] = value;
+        values.Outputs[step.Code + ".button"] = button.Code.Trim();
+        foreach (var (name, value) in form) values.Outputs[step.Code + ".form." + name] = value;
+
+        var context = new WorkflowRunContext(
+            new ParameterContext { Claims = state.Claims, Now = state.Now }, state.Form, state.Key, pending.ModuleId, pending.ActionCode, state.RunBy);
+
+        var answered = new Record(step, TrackingStatus.Success, button.Cancel ? "Dibatalkan oleh pengunjung" : $"Tombol '{button.Label.Trim()}'", 0);
+        if (button.Cancel)
+        {
+            await WriteTrackingAsync(workflow, runId, context, [answered]);
+            return new WorkflowRunResult(
+                runId, workflow.Id, true, WorkflowFailureKind.None, $"Workflow '{workflow.Name}' dibatalkan.",
+                [new WorkflowStepResult(step.Code, step.DisplayName, TrackingStatus.Success, answered.Text, 0)]);
+        }
+
         var index = WorkflowGraph.Index(workflow.Steps);
-        var records = new List<Record>();
+        var next = WorkflowGraph.NextOf(step, false);
+        var start = next is not null && index.TryGetValue(next, out var found) ? found : null;
+        return await ContinueAsync(workflow, runId, context, values, start, [answered], ct);
+    }
+
+    /// <summary>
+    /// Runs from <paramref name="start"/> until a step has no next step, a step fails, or an Action step pauses the run. Writes the
+    /// tracking rows of <paramref name="records"/> and of the steps it ran.
+    /// </summary>
+    private async Task<WorkflowRunResult> ContinueAsync(
+        Workflow workflow, Guid runId, WorkflowRunContext context, WorkflowValues values, WorkflowStep? start,
+        List<Record> records, CancellationToken ct)
+    {
+        var index = WorkflowGraph.Index(workflow.Steps);
         WorkflowDisplay? display = null;
         var failure = WorkflowFailureKind.None;
         var message = "";
         WorkflowStep? failedStep = null;
+        var paused = false;
 
         ISqlScope? scope = null;
         if (workflow.Transaction && workflow.Steps.Any(s => s.Type == StepType.DataSource))
@@ -116,9 +194,28 @@ public sealed class WorkflowRunner(
         var rolledBack = false;
         try
         {
-            var current = workflow.Steps.Count > 0 ? workflow.Steps[0] : null;
+            var current = start;
             for (var guard = 0; current is not null && guard <= workflow.Steps.Count; guard++)
             {
+                if (current.Type == StepType.Action)
+                {
+                    var prompt = await PauseAsync(workflow, current, runId, context, values, ct);
+                    if (prompt is null)
+                    {
+                        failure = WorkflowFailureKind.Error;
+                        failedStep = current;
+                        message = "Form tidak dapat ditampilkan.";
+                        records.Add(new Record(current, TrackingStatus.Failed, message, 0));
+                    }
+                    else
+                    {
+                        records.Add(new Record(current, TrackingStatus.Waiting, "Menunggu jawaban pengunjung", 0));
+                        display = new WorkflowDisplay("form", null, null, prompt);
+                        paused = true;
+                    }
+                    break;
+                }
+
                 var stopwatch = Stopwatch.StartNew();
                 var outcome = await RunStepAsync(workflow, current, context, values, scope, ct);
                 var ms = (int)stopwatch.ElapsedMilliseconds;
@@ -187,6 +284,18 @@ public sealed class WorkflowRunner(
             if (undone) message += " Perubahan database dari workflow ini dibatalkan.";
         }
 
+        await WriteTrackingAsync(workflow, runId, context, records);
+
+        var steps = records.Select(r => new WorkflowStepResult(r.Step.Code, r.Step.DisplayName, r.Status, r.Text, r.Ms)).ToList();
+        if (failure != WorkflowFailureKind.None)
+            return new WorkflowRunResult(runId, workflow.Id, false, failure, message, steps, null, rolledBack);
+        return new WorkflowRunResult(
+            runId, workflow.Id, true, failure,
+            paused ? $"Workflow '{workflow.Name}' menunggu jawaban." : $"Workflow '{workflow.Name}' selesai.", steps, display);
+    }
+
+    private async Task WriteTrackingAsync(Workflow workflow, Guid runId, WorkflowRunContext context, IReadOnlyList<Record> records)
+    {
         var tracking = records.Select(r => new TrackingEntry(
             Guid.NewGuid(), runId, workflow.Id, r.Step.Code, r.Step.DisplayName, r.Status, r.Text, r.Ms, context.ModuleId,
             context.ActionCode, context.RunBy, DateTime.UtcNow)).ToList();
@@ -199,11 +308,38 @@ public sealed class WorkflowRunner(
             // the run itself is done: losing the history rows must not turn it into a failure
             logger.LogError(ex, "Workflow {WorkflowCode} run {RunId}: tracking could not be written.", workflow.Code, runId);
         }
+    }
 
-        var steps = records.Select(r => new WorkflowStepResult(r.Step.Code, r.Step.DisplayName, r.Status, r.Text, r.Ms)).ToList();
-        return failure == WorkflowFailureKind.None
-            ? new WorkflowRunResult(runId, workflow.Id, true, failure, $"Workflow '{workflow.Name}' selesai.", steps, display)
-            : new WorkflowRunResult(runId, workflow.Id, false, failure, message, steps, null, rolledBack);
+    /// <summary>Saves the run's state and builds the form the visitor sees; null when the state cannot be saved.</summary>
+    private async Task<WorkflowPrompt?> PauseAsync(
+        Workflow workflow, WorkflowStep step, Guid runId, WorkflowRunContext context, WorkflowValues values, CancellationToken ct)
+    {
+        var action = step.Action;
+        if (action is null) return null;
+
+        var state = new WorkflowRunState
+        {
+            Form = new Dictionary<string, string?>(values.Form), Key = values.Key, Claims = new Dictionary<string, string?>(values.Claims),
+            Now = values.Now, RunBy = context.RunBy,
+        };
+        foreach (var (key, value) in values.Outputs) state.Outputs[key] = WorkflowValues.ToText(value);
+
+        try
+        {
+            await runStore.SaveAsync(new PendingRun(
+                runId, workflow.Id, context.ModuleId, context.ActionCode, step.Code, WorkflowJson.SerializeData(state),
+                DateTime.UtcNow + ActionStepConfig.Lifetime), ct);
+        }
+        catch (Exception ex) when (ex is Microsoft.Data.SqlClient.SqlException or InvalidOperationException)
+        {
+            logger.LogError(ex, "Workflow {WorkflowCode} run {RunId}: the waiting state could not be saved.", workflow.Code, runId);
+            return null;
+        }
+
+        return new WorkflowPrompt(
+            runId, WorkflowTemplate.Expand(action.Title, values.Get).Trim(),
+            string.IsNullOrWhiteSpace(action.Intro) ? null : WorkflowTemplate.Expand(action.Intro, values.Get).Trim(),
+            action.Fields, action.Buttons);
     }
 
     // ---- one step ----------------------------------------------------------------------------------
@@ -221,6 +357,7 @@ public sealed class WorkflowRunner(
                 StepType.Page => RunPage(step, values),
                 StepType.Module => await RunModuleAsync(workflow, step, values, ct),
                 StepType.Condition => RunCondition(step, values),
+                StepType.Javascript => RunScript(workflow, step, values),
                 _ => Outcome.Fail(WorkflowFailureKind.Unavailable, GenericUnavailable),
             };
         }
@@ -403,6 +540,27 @@ public sealed class WorkflowRunner(
             .Where(p => !string.IsNullOrWhiteSpace(p.Name))
             .Select(p => Uri.EscapeDataString(p.Name.Trim()) + "=" + Uri.EscapeDataString(WorkflowTemplate.Expand(p.Value, values.Get))));
         return Outcome.Ok(display: new WorkflowDisplay("module", null, query.Length == 0 ? path : path + "?" + query));
+    }
+
+    private Outcome RunScript(Workflow workflow, WorkflowStep step, WorkflowValues values)
+    {
+        var config = step.Script;
+        if (config is null) return Outcome.Fail(WorkflowFailureKind.Unavailable, GenericUnavailable);
+
+        var result = scripts.Run(config.Source, WorkflowScriptContext.ToJson(values));
+        switch (result.Failure)
+        {
+            case ScriptFailureKind.None:
+                if (result.Json is not null) values.Outputs[step.Code + ".body"] = result.Json;
+                return Outcome.Ok();
+            case ScriptFailureKind.Thrown:
+                return Outcome.Fail(WorkflowFailureKind.Business, result.Message ?? JintScriptEngine.GenericError);
+            default:
+                logger.LogWarning("Workflow {WorkflowCode} step {Step}: the script failed ({Kind}): {Detail}", workflow.Code, step.Code, result.Failure, result.Detail);
+                return Outcome.Fail(
+                    result.Failure == ScriptFailureKind.Limit ? WorkflowFailureKind.Timeout : WorkflowFailureKind.Error,
+                    result.Message ?? JintScriptEngine.GenericError);
+        }
     }
 
     private static Outcome RunCondition(WorkflowStep step, WorkflowValues values)

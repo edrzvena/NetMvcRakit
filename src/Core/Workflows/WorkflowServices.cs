@@ -20,6 +20,9 @@ public sealed class WorkflowOptions
     /// </summary>
     public List<string> AllowedHosts { get; set; } = [];
 
+    /// <summary>Limits of the Javascript step's sandbox (<c>Rakit:Workflow:Script</c>).</summary>
+    public ScriptOptions Script { get; set; } = new();
+
     /// <summary>Whether <paramref name="url"/> may be called according to <see cref="AllowedHosts"/>.</summary>
     public bool IsAllowed(Uri url)
     {
@@ -39,6 +42,23 @@ public sealed class WorkflowOptions
         }
         return false;
     }
+}
+
+/// <summary>The sandbox of the Javascript step. Values outside the ranges are clamped to them.</summary>
+public sealed class ScriptOptions
+{
+    public const int MaxTimeoutMs = 5_000;
+    public const int MaxMemoryMb = 128;
+
+    /// <summary>Wall-clock time one run may take.</summary>
+    public int TimeoutMs { get; set; } = 500;
+
+    public int MemoryLimitMb { get; set; } = 16;
+    public int MaxStatements { get; set; } = 100_000;
+    public int MaxRecursion { get; set; } = 100;
+
+    /// <summary>Largest JSON a script may return.</summary>
+    public int MaxResultBytes { get; set; } = 65_536;
 }
 
 /// <summary>Bound from <c>Rakit:Mail</c>. Without <see cref="Host"/> and <see cref="From"/> an Email step is only logged, not sent.</summary>

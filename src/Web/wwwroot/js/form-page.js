@@ -41,6 +41,16 @@
     });
 
     // Workflow buttons: the same validated form values go to the workflow instead of the Insert data source.
+    // A workflow that reaches an Action step answers with a form (display.kind "form"); its buttons come back through env.
+    const actionEnv = {
+        resumeUrl: root.dataset.resumeUrl,
+        send: rf.send,
+        failureText: rf.failureText,
+        onDone: async (data) => {
+            showMessage(data.message || 'Aksi dijalankan.', true);
+            await fresh();
+        },
+    };
     form.querySelectorAll('[data-action]').forEach((button) => {
         button.addEventListener('click', async () => {
             if (button.dataset.confirm && !window.confirm(button.dataset.confirm)) return;
@@ -51,8 +61,13 @@
             const res = await rf.send('POST', url, new FormData(form));
             button.disabled = false;
             if (res.ok) {
+                const display = res.data && res.data.display;
+                if (display && display.kind === 'form' && window.RakitActionResult) {
+                    window.RakitActionResult.show(display, actionEnv); // the message and the reset come when the form is answered
+                    return;
+                }
                 showMessage((res.data && res.data.message) || 'Aksi dijalankan.', true);
-                if (window.RakitActionResult) window.RakitActionResult.show(res.data && res.data.display);
+                if (window.RakitActionResult) window.RakitActionResult.show(display);
                 await fresh();
             } else if (res.status === 400) {
                 rf.showErrors(res);

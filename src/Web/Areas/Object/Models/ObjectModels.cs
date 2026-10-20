@@ -65,10 +65,21 @@ public sealed record ObjectWidgetData(object? Value, string? Text, string? Label
 public sealed record ObjectActionStep(string Code, string Name, string Status);
 
 /// <summary>A workflow button ran all its steps.</summary>
-/// <param name="Display">After the run: <c>kind</c> = <c>html</c> (show <c>html</c>, already sanitized) or <c>module</c> (go to <c>url</c>); null = nothing more to show.</param>
+/// <param name="Display">After the run: <c>kind</c> = <c>html</c> (show <c>html</c>, already sanitized), <c>module</c> (go to <c>url</c>) or <c>form</c> (show <c>prompt</c>: the run waits for a button); null = nothing more to show.</param>
 public sealed record ObjectActionDone(string Message, IReadOnlyList<ObjectActionStep> Steps, ObjectActionDisplay? Display = null);
 
-public sealed record ObjectActionDisplay(string Kind, string? Html, string? Url);
+public sealed record ObjectActionDisplay(string Kind, string? Html, string? Url, ObjectPrompt? Prompt = null);
+
+/// <summary>The form of an Action step. <c>runId</c> is what the answer is sent to (<c>resume/{runId}</c>).</summary>
+public sealed record ObjectPrompt(
+    Guid RunId, string Title, string? Intro, IReadOnlyList<ObjectPromptField> Fields, IReadOnlyList<ObjectPromptButton> Buttons);
+
+/// <param name="Type">text, textarea, number, date, dateTime, boolean, select, email, url or section.</param>
+public sealed record ObjectPromptField(
+    string Name, string Label, string Type, bool Required, string? Default, string? Placeholder, string? Help, int? ColSize,
+    string? Min, string? Max, string? Step, int? MaxLength, IReadOnlyList<ObjectLookupItem>? Options);
+
+public sealed record ObjectPromptButton(string Code, string Label, string? Style, bool Cancel);
 
 /// <summary>A write went through.</summary>
 public sealed record ObjectDone(string Message);

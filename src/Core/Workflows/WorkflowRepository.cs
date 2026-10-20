@@ -405,6 +405,17 @@ VALUES (@id, @workflow, NULL, @data, @user, @now, @order)";
                 OnTrue = Link(step.Condition.OnTrue),
                 OnFalse = Link(step.Condition.OnFalse),
             },
+            Script = step.Type != StepType.Javascript || step.Script is null ? null : new ScriptStepConfig { Source = step.Script.Source ?? "" },
+            Action = step.Type != StepType.Action || step.Action is null ? null : new ActionStepConfig
+            {
+                Title = step.Action.Title.Trim(),
+                Intro = Text(step.Action.Intro),
+                Fields = step.Action.Fields,
+                Buttons = step.Action.Buttons.Select(b => new ActionButton
+                {
+                    Code = b.Code.Trim(), Label = b.Label.Trim(), Style = Text(b.Style), Cancel = b.Cancel,
+                }).ToList(),
+            },
         };
     }
 

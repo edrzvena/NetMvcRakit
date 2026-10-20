@@ -1,4 +1,5 @@
-@* Shown by action-result.js when a workflow ends with a Page step (sanitized HTML from the server). *@
+@* Shown by action-result.js when a workflow ends with a Page step (sanitized HTML from the server), and the form of an Action
+   step (its fields and buttons are drawn by the script; the run waits on the server until a button is pressed). *@
 <div class="modal fade" id="action-result-modal" tabindex="-1" aria-labelledby="action-result-title" aria-hidden="true">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
@@ -11,5 +12,22 @@
                 <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Tutup</button>
             </div>
         </div>
+    </div>
+</div>
+
+<div class="modal fade" id="action-form-modal" tabindex="-1" aria-labelledby="action-form-title" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-lg">
+        <form class="modal-content" novalidate>
+            <div class="modal-header">
+                <h2 class="modal-title h5" id="action-form-title">Form</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Tutup"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted d-none" id="action-form-intro"></p>
+                <div class="alert d-none" id="action-form-alert" role="alert"></div>
+                <div class="row" id="action-form-fields"></div>
+            </div>
+            <div class="modal-footer" id="action-form-footer"></div>
+        </form>
     </div>
 </div>

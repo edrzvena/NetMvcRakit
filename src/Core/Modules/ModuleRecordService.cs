@@ -292,12 +292,17 @@ public sealed class ModuleRecordService(
     /// </summary>
     internal static Dictionary<string, string?> ValidateFields(
         Module module, IReadOnlyDictionary<string, string?> submitted, bool forInsert)
+        => ValidateFields(module.Config.Form.DataFields, submitted, forInsert);
+
+    /// <summary>The same rules for any list of form fields (an Action step's form); sections in the list are skipped.</summary>
+    internal static Dictionary<string, string?> ValidateFields(
+        IEnumerable<ModuleFormField> fields, IReadOnlyDictionary<string, string?> submitted, bool forInsert)
     {
         var values = new Dictionary<string, string?>(submitted, StringComparer.OrdinalIgnoreCase);
         var form = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         var errors = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var field in module.Config.Form.DataFields)
+        foreach (var field in fields.Where(f => !f.IsSection))
         {
             var name = field.Name.Trim();
             var label = string.IsNullOrWhiteSpace(field.Label) ? name : field.Label.Trim();

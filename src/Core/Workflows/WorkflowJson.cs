@@ -41,6 +41,7 @@ public static class WorkflowJson
         TrackingStatus.Success => "success",
         TrackingStatus.Failed => "failed",
         TrackingStatus.RolledBack => "rolledback",
+        TrackingStatus.Waiting => "waiting",
         _ => "skipped",
     };
 
@@ -49,6 +50,7 @@ public static class WorkflowJson
         "success" => TrackingStatus.Success,
         "failed" => TrackingStatus.Failed,
         "rolledback" => TrackingStatus.RolledBack,
+        "waiting" => TrackingStatus.Waiting,
         _ => TrackingStatus.Skipped,
     };
 

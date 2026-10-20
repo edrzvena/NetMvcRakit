@@ -12,6 +12,7 @@ namespace Rakit.Web.Areas.Builder.Controllers;
 public class WorkflowController(
     IWorkflowRepository workflows,
     IWorkflowChecker checker,
+    IWorkflowScriptEngine scripts,
     IDataSourceRepository dataSources,
     IModuleRepository modules,
     ILogger<WorkflowController> logger) : Controller
@@ -190,7 +191,7 @@ public class WorkflowController(
                 return Json(new { message = "Daftar langkah tidak dapat dibaca." });
             }
 
-            var issues = WorkflowInputValidator.Validate(new WorkflowInput { Code = "check", Name = "check", Steps = steps })
+            var issues = WorkflowInputValidator.Validate(new WorkflowInput { Code = "check", Name = "check", Transaction = transaction, Steps = steps })
                 .Select(e => new WorkflowIssue(true, e)).ToList();
             issues.AddRange(await checker.CheckAsync(steps, transaction, ct));
             return Json(new { issues = issues.Select(i => new { isError = i.IsError, message = i.Message }) });
@@ -201,6 +202,50 @@ public class WorkflowController(
             Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
             return Json(new { message = "Database tidak tersedia." });
         }
+    }
+
+    // ---- test a script (builder screen: the real reason is shown in full) -------------------------
+
+    private const int MaxTestContextChars = 100_000;
+
+    /// <summary>
+    /// "Uji skrip": runs a Javascript step's source in the same sandbox and with the same limits as a real run, against the sample
+    /// <c>ctx</c> the builder typed (JSON). Nothing is saved or written. The answer says how it went, with the detail a real run
+    /// keeps from end users.
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    public IActionResult TestScript([FromBody] JsonElement request)
+    {
+        var source = request.ValueKind == JsonValueKind.Object && request.TryGetProperty("source", out var s) && s.ValueKind == JsonValueKind.String ? s.GetString() ?? "" : "";
+        var context = request.ValueKind == JsonValueKind.Object && request.TryGetProperty("context", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString() ?? "" : "";
+
+        if (string.IsNullOrWhiteSpace(source) || source.Length > ScriptStepConfig.MaxLength)
+            return BadRequest(new { message = $"Skrip wajib diisi dan maksimal {ScriptStepConfig.MaxLength} karakter." });
+        if (context.Length > MaxTestContextChars)
+            return BadRequest(new { message = "Data contoh terlalu besar." });
+
+        // the sample is JSON of an object; anything else would only fail inside the script with a confusing message
+        try
+        {
+            using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(context) ? "{}" : context);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+                return BadRequest(new { message = "Data contoh harus berupa objek JSON." });
+        }
+        catch (JsonException ex)
+        {
+            return BadRequest(new { message = "Data contoh bukan JSON yang valid: " + ex.Message });
+        }
+
+        var result = scripts.Run(source, string.IsNullOrWhiteSpace(context) ? "{}" : context);
+        return Json(new
+        {
+            ok = result.Ok,
+            kind = result.Failure.ToString().ToLowerInvariant(),
+            message = result.Message,
+            detail = result.Detail,
+            result = result.Json,
+            durationMs = result.DurationMs,
+        });
     }
 
     // ---- internals -----------------------------------------------------------------------------

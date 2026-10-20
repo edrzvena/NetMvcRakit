@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Rakit.Core.Modules;
 
 namespace Rakit.Core.Workflows;
 
@@ -9,7 +10,7 @@ public enum WorkflowStatus { Draft, Published }
 /// <c>Page</c> and <c>Module</c> are the PRD's Html/Page and Module/Widget steps: they do not run anything, they tell the
 /// visitor's browser what to show next (a message page, or another module).
 /// </summary>
-public enum StepType { DataSource, Rest, Email, Page, Module, Condition }
+public enum StepType { DataSource, Rest, Email, Page, Module, Condition, Javascript, Action }
 
 /// <summary>Serialised camelCase: eq, ne, gt, ge, lt, le, contains, empty, notEmpty.</summary>
 public enum ConditionOperator { Eq, Ne, Gt, Ge, Lt, Le, Contains, Empty, NotEmpty }
@@ -108,6 +109,58 @@ public sealed class ConditionStepConfig
 }
 
 /// <summary>
+/// A script run on the server in a sandbox (no .NET, file or network access; time, memory and statement limits). The source is the
+/// body of a function with one argument, <c>ctx</c> = <c>{ form, key, claims, now, steps }</c> (<c>steps.code.row.Column</c> ... the
+/// outputs of earlier steps), and <c>return</c>s a value that can be written as JSON. That JSON is the step's output: <c>{code}.body</c>,
+/// read by later steps as <c>{{code.json.path}}</c>. <c>throw new Error("text")</c> fails the step with that text for the user.
+/// </summary>
+public sealed class ScriptStepConfig
+{
+    public const int MaxLength = 20_000;
+
+    public string Source { get; set; } = "";
+}
+
+/// <summary>A button of an Action step. A <see cref="Cancel"/> button ends the workflow without running the steps after the Action.</summary>
+public sealed class ActionButton
+{
+    public const int MaxCodeLength = 30;
+    public const int MaxLabelLength = 50;
+
+    public string Code { get; set; } = "";
+    public string Label { get; set; } = "";
+
+    /// <summary>One of <see cref="ModuleAction.Styles"/>; blank = primary.</summary>
+    public string? Style { get; set; }
+
+    public bool Cancel { get; set; }
+}
+
+/// <summary>
+/// Stops the run and shows the visitor a form; the run goes on when a button is pressed. Outputs for later steps:
+/// <c>{code}.button</c> (the button's code) and <c>{code}.form.FieldName</c> (the value typed, as text). The fields are validated
+/// with the same rules as a module form; a select needs fixed options (no lookup) and a browse field is not available.
+/// </summary>
+public sealed class ActionStepConfig
+{
+    public const int MaxFields = 20;
+    public const int MaxButtons = 4;
+    public const int MaxTitleLength = 100;
+    public const int MaxIntroLength = 500;
+
+    /// <summary>How long the visitor has to answer before the run is no longer valid.</summary>
+    public static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(30);
+
+    public string Title { get; set; } = "";
+
+    /// <summary>Plain text under the title.</summary>
+    public string? Intro { get; set; }
+
+    public List<ModuleFormField> Fields { get; set; } = [];
+    public List<ActionButton> Buttons { get; set; } = [];
+}
+
+/// <summary>
 /// One step of a workflow. Steps form a graph: <see cref="Next"/> names the step that follows (null = the workflow ends here);
 /// a Condition step names its two branches instead. The first step in the list is where the run starts.
 /// </summary>
@@ -140,6 +193,8 @@ public sealed class WorkflowStep
     public PageStepConfig? Page { get; set; }
     public ModuleStepConfig? Module { get; set; }
     public ConditionStepConfig? Condition { get; set; }
+    public ScriptStepConfig? Script { get; set; }
+    public ActionStepConfig? Action { get; set; }
 
     [JsonIgnore]
     public string DisplayName => string.IsNullOrWhiteSpace(Name) ? Code : Name.Trim();
@@ -178,6 +233,9 @@ public enum TrackingStatus
 
     /// <summary>The step succeeded but the workflow's transaction was rolled back because a later step failed.</summary>
     RolledBack,
+
+    /// <summary>An Action step is showing its form; the run continues when the visitor presses a button (a later row for the same step says how it went).</summary>
+    Waiting,
 }
 
 /// <summary>One executed (or skipped) step of a run. <see cref="RunId"/> groups the steps of one run.</summary>
@@ -186,6 +244,9 @@ public sealed record TrackingEntry(
     string? Message, int DurationMs, Guid? ModuleId, string? ActionCode, string? RunBy, DateTime Created);
 
 public sealed class WorkflowNotFoundException(Guid id) : Exception($"Workflow '{id}' not found.");
+
+/// <summary>No waiting run with that id (never existed, other module, expired, already answered, or its workflow is gone or a draft).</summary>
+public sealed class WorkflowRunNotFoundException(Guid runId) : Exception($"Workflow run '{runId}' is not waiting for an answer.");
 
 /// <summary>The input failed validation; <see cref="Errors"/> are safe to show to the builder.</summary>
 public sealed class WorkflowValidationException(IReadOnlyList<string> errors)

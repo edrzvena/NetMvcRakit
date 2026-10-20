@@ -249,11 +249,29 @@ public class PageController(
     private Task<IActionResult> RunActionAsync(Guid moduleId, string code, string? key, CancellationToken ct) => RecordAsync(async () =>
     {
         var context = await HttpParameterContext.FromAsync(HttpContext, ct);
-        var result = await actions.RunAsync(moduleId, code, key, context.Form, context, ct);
+        return ActionResponse(await actions.RunAsync(moduleId, code, key, context.Form, context, ct));
+    });
+
+    /// <summary>
+    /// The visitor's answer to the form of an Action step (the run paused there and gave <c>runId</c>): the button pressed is
+    /// <c>_button</c>, the rest are the field values. 400 = a value is invalid (the form stays open and the run keeps waiting),
+    /// 404 = the form expired, was already answered, or belongs to another page; otherwise the same answers as an action. The
+    /// answer can be another form.
+    /// </summary>
+    [HttpPost("{moduleId:guid}/resume/{runId:guid}"), ValidateAntiForgeryToken, RequestSizeLimit(MaxWriteBodyBytes)]
+    public Task<IActionResult> ResumeAction(Guid moduleId, Guid runId, CancellationToken ct) => RecordAsync(async () =>
+    {
+        var context = await HttpParameterContext.FromAsync(HttpContext, ct);
+        var button = context.Form.GetValueOrDefault("_button") ?? "";
+        return ActionResponse(await actions.ResumeAsync(moduleId, runId, button, context.Form, ct));
+    });
+
+    private IActionResult ActionResponse(ModuleActionResult result)
+    {
         if (result.Success)
             return Json(new ObjectActionDone(result.Message,
                 result.Steps.Select(s => new ObjectActionStep(s.Code, s.Name, s.Status.ToString().ToLowerInvariant())).ToList(),
-                result.Display is { } d ? new ObjectActionDisplay(d.Kind, d.Html, d.Url) : null));
+                result.Display is { } d ? ToDisplay(d) : null));
 
         return Error(result.Failure switch
         {
@@ -262,7 +280,18 @@ public class PageController(
             WorkflowFailureKind.Timeout => StatusCodes.Status504GatewayTimeout,
             _ => StatusCodes.Status500InternalServerError,
         }, result.Message);
-    });
+    }
+
+    private static ObjectActionDisplay ToDisplay(WorkflowDisplay d) => new(d.Kind, d.Html, d.Url, d.Prompt is { } p ? ToPrompt(p) : null);
+
+    private static ObjectPrompt ToPrompt(WorkflowPrompt p) => new(
+        p.RunId, p.Title, p.Intro,
+        p.Fields.Select(f => new ObjectPromptField(
+            f.Name.Trim(), string.IsNullOrWhiteSpace(f.Label) ? f.Name.Trim() : f.Label.Trim(),
+            char.ToLowerInvariant(f.Type.ToString()[0]) + f.Type.ToString()[1..], f.Required && !f.Readonly, f.Default, f.Placeholder, f.Help, f.ColSize,
+            f.Min, f.Max, f.Step, f.MaxLength,
+            f.Options?.Select(o => new ObjectLookupItem(o.Value.Trim(), string.IsNullOrWhiteSpace(o.Text) ? o.Value.Trim() : o.Text.Trim())).ToList())).ToList(),
+        p.Buttons.Select(b => new ObjectPromptButton(b.Code.Trim(), b.Label.Trim(), b.Style?.Trim().ToLowerInvariant(), b.Cancel)).ToList());
 
     /// <summary>
     /// Error contract of the record endpoints (all bodies are <see cref="ObjectError"/>): 400 invalid input (per-field

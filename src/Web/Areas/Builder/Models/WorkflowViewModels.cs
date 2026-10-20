@@ -46,6 +46,10 @@ public static class WorkflowDisplayText
         TrackingStatus.Success => "Berhasil",
         TrackingStatus.Failed => "Gagal",
         TrackingStatus.RolledBack => "Dibatalkan",
+        TrackingStatus.Waiting => "Menunggu",
         _ => "Dilewati",
     };
 }
+
+/// <summary>The Tracking page: the workflows for its filter and the default range (the last 7 days, yyyy-MM-dd).</summary>
+public sealed record TrackingIndexViewModel(IReadOnlyList<WorkflowSummary> Workflows, string From, string To, int MaxDays);

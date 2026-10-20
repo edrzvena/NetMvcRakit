@@ -63,14 +63,17 @@ public sealed class WorkflowValues(
     public Dictionary<string, object?> Outputs { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     public string? Key { get; } = key;
+    public IReadOnlyDictionary<string, string?> Form { get; } = form;
+    public IReadOnlyDictionary<string, string?> Claims { get; } = claims;
+    public DateTimeOffset Now { get; } = now;
 
     /// <summary>The text for <paramref name="placeholderKey"/>, or null when there is none.</summary>
     public string? Get(string placeholderKey)
     {
         if (placeholderKey.Equals("key", StringComparison.OrdinalIgnoreCase)) return Key;
-        if (placeholderKey.Equals("now", StringComparison.OrdinalIgnoreCase)) return now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
-        if (placeholderKey.StartsWith("form.", StringComparison.OrdinalIgnoreCase)) return Find(form, placeholderKey[5..]);
-        if (placeholderKey.StartsWith("claim.", StringComparison.OrdinalIgnoreCase)) return Find(claims, placeholderKey[6..]);
+        if (placeholderKey.Equals("now", StringComparison.OrdinalIgnoreCase)) return Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+        if (placeholderKey.StartsWith("form.", StringComparison.OrdinalIgnoreCase)) return Find(Form, placeholderKey[5..]);
+        if (placeholderKey.StartsWith("claim.", StringComparison.OrdinalIgnoreCase)) return Find(Claims, placeholderKey[6..]);
         if (Outputs.TryGetValue(placeholderKey, out var output)) return ToText(output);
 
         var cut = placeholderKey.IndexOf(".json.", StringComparison.OrdinalIgnoreCase);
@@ -82,12 +85,12 @@ public sealed class WorkflowValues(
     /// <summary>A fresh context for a data source: the form, the key as RouteValue <c>id</c>, claims, the clock and the outputs so far.</summary>
     public ParameterContext ToParameterContext() => new()
     {
-        Form = new Dictionary<string, string?>(form, StringComparer.OrdinalIgnoreCase),
+        Form = new Dictionary<string, string?>(Form, StringComparer.OrdinalIgnoreCase),
         Route = Key is null
             ? new Dictionary<string, string?>()
             : new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase) { ["id"] = Key },
-        Claims = claims,
-        Now = now,
+        Claims = Claims,
+        Now = Now,
         StepOutputs = new Dictionary<string, object?>(Outputs, StringComparer.OrdinalIgnoreCase),
     };
 

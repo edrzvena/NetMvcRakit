@@ -297,6 +297,25 @@ public static partial class ModuleInputValidator
             ValidateFormField(field, names, errors);
     }
 
+    /// <summary>
+    /// The field rules of a module form for a list of fields that live elsewhere (an Action step). The caller limits the count.
+    /// A select needs fixed options (nothing here can read a lookup data source) and a browse field is not available.
+    /// </summary>
+    public static IReadOnlyList<string> ValidateStandaloneFields(IReadOnlyList<ModuleFormField> fields)
+    {
+        var errors = new List<string>();
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var field in fields)
+        {
+            ValidateFormField(field, names, errors);
+            var name = field.Name?.Trim() ?? "";
+            if (field.Type == FormFieldType.Browse) errors.Add($"Field '{name}': tipe browse tidak tersedia di langkah Form.");
+            else if (field.Type == FormFieldType.Select && field.Lookup is not null)
+                errors.Add($"Field '{name}': select di langkah Form memakai opsi tetap, bukan lookup.");
+        }
+        return errors;
+    }
+
     /// <summary>A Form module only inserts: an Insert (Command) source and at least one field; no list, detail, update or delete.</summary>
     private static void ValidateFormModule(ModuleConfig config, List<string> errors)
     {

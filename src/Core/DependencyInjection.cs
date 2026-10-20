@@ -74,6 +74,9 @@ public static class DependencyInjection
         services.AddSingleton<IModuleLinkResolver, ModuleLinkResolver>();
         services.AddSingleton<IWorkflowRepository, WorkflowRepository>();
         services.AddSingleton<IWorkflowChecker, WorkflowChecker>();
+        services.AddSingleton<IWorkflowScriptEngine, JintScriptEngine>();
+        services.AddSingleton<IWorkflowRunStore, WorkflowRunStore>();
+        services.AddSingleton<ITrackingQueryService, TrackingQueryService>();
         services.AddSingleton<IWorkflowRunner, WorkflowRunner>();
         services.AddSingleton<IModuleActionService, ModuleActionService>();
 

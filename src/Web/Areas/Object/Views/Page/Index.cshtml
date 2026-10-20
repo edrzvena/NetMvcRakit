@@ -45,6 +45,7 @@
      data-export-url="@Url.Action("Export", "Page", new { area = "Object", moduleId = Model.Id })"
      data-import-url="@Url.Action("Import", "Page", new { area = "Object", moduleId = Model.Id })"
      data-action-url="@Url.Action("RunAction", "Page", new { area = "Object", moduleId = Model.Id, code = "__CODE__" })"
+     data-resume-url="@Url.Action("ResumeAction", "Page", new { area = "Object", moduleId = Model.Id, runId = Guid.Empty })"
      data-row-actions="@System.Text.Json.JsonSerializer.Serialize(rowActions)"
      data-filters="@System.Text.Json.JsonSerializer.Serialize(filterInfo)"
      data-take="@display.Take" data-max-take="@display.MaxTake">

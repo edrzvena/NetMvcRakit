@@ -25,6 +25,19 @@ public interface IModuleActionService
     Task<ModuleActionResult> RunAsync(
         Guid moduleId, string actionCode, string? key, IReadOnlyDictionary<string, string?> values, ParameterContext context,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Goes on with a run that an Action step of this module's workflow paused (the form came back from <see cref="RunAsync"/> as a
+    /// <c>form</c> display): <paramref name="buttonCode"/> is the button pressed and <paramref name="values"/> the answers. The
+    /// answer can be another form. A failing step is reported in the result (not thrown).
+    /// </summary>
+    /// <exception cref="ModuleNotFoundException">No such module, deleted, or still a draft.</exception>
+    /// <exception cref="ModuleRecordUnavailableException">
+    /// The form is no longer waiting for an answer: it expired, was already answered, or belongs to another module (<c>NotConfigured</c>).
+    /// </exception>
+    /// <exception cref="ModuleRecordValidationException">A value is invalid (the form stays open) or the button is unknown.</exception>
+    Task<ModuleActionResult> ResumeAsync(
+        Guid moduleId, Guid runId, string buttonCode, IReadOnlyDictionary<string, string?> values, CancellationToken ct = default);
 }
 
 public sealed class ModuleActionService(
@@ -78,6 +91,32 @@ public sealed class ModuleActionService(
 
         return run.Success
             ? new ModuleActionResult(true, WorkflowFailureKind.None, $"Aksi '{action.Label.Trim()}' berhasil dijalankan.", run.Steps, run.Display)
+            : new ModuleActionResult(false, run.Failure, run.Message, run.Steps);
+    }
+
+    public async Task<ModuleActionResult> ResumeAsync(
+        Guid moduleId, Guid runId, string buttonCode, IReadOnlyDictionary<string, string?> values, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+
+        var module = await modules.GetAsync(moduleId, ct);
+        if (module is null || module.Status != ModuleStatus.Published || module.Type is not (ModuleType.Table or ModuleType.Form))
+            throw new ModuleNotFoundException(moduleId);
+
+        WorkflowRunResult run;
+        try
+        {
+            run = await runner.ResumeAsync(runId, module.Id, buttonCode, values, ct);
+        }
+        catch (WorkflowRunNotFoundException ex)
+        {
+            throw new ModuleRecordUnavailableException(
+                "Form ini sudah kedaluwarsa atau sudah dijawab. Jalankan aksinya lagi.",
+                "the run is not waiting for this module (never existed, expired, answered, or its workflow is gone)", notConfigured: true, ex);
+        }
+
+        return run.Success
+            ? new ModuleActionResult(true, WorkflowFailureKind.None, run.Message, run.Steps, run.Display)
             : new ModuleActionResult(false, run.Failure, run.Message, run.Steps);
     }
 }
