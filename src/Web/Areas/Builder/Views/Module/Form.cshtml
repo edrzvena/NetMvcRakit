@@ -295,35 +295,120 @@
 
         @* ---------------- Display ---------------- *@
         <div class="tab-pane fade" id="pane-display" role="tabpanel" aria-labelledby="tab-display">
-            <div class="row g-3 mb-3">
-                <div class="col-md-3">
-                    <label class="form-label" for="take">Baris per halaman</label>
-                    <input class="form-control" type="number" id="take" min="1" max="1000" value="10" />
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label" for="maxTake">Maksimum per halaman</label>
-                    <input class="form-control" type="number" id="maxTake" min="1" max="1000" value="100" />
-                    <div class="form-text">Batas yang boleh diminta pengunjung (maks 1000).</div>
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label" for="keyField">Kolom kunci</label>
-                    <input class="form-control" id="keyField" list="key-columns" maxlength="128" placeholder="mis. Id" />
-                    <datalist id="key-columns"></datalist>
-                    <div class="form-text">Kolom list yang berisi kunci record. Wajib bila ada aksi Detail, Ubah, atau Hapus.</div>
-                </div>
-            </div>
+            <ul class="nav nav-pills mb-3" role="tablist" id="display-subtabs">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active py-1" id="dsp-tab-props" data-bs-toggle="pill" data-bs-target="#dsp-props" type="button" role="tab" aria-controls="dsp-props" aria-selected="true">Properti dan header</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link py-1" id="dsp-tab-columns" data-bs-toggle="pill" data-bs-target="#dsp-columns" type="button" role="tab" aria-controls="dsp-columns" aria-selected="false">Kolom</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link py-1" id="dsp-tab-filters" data-bs-toggle="pill" data-bs-target="#dsp-filters" type="button" role="tab" aria-controls="dsp-filters" aria-selected="false">Filter</button>
+                </li>
+            </ul>
 
-            <div class="border rounded p-3 mb-3">
-                <h2 class="h5">Kolom</h2>
-                <div class="mb-2">
-                    <button type="button" class="btn btn-sm btn-outline-secondary" id="load-columns">Muat kolom dari data source</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" id="add-column">+ Kolom</button>
-                    <span id="columns-status" class="ms-2 small text-muted" aria-live="polite"></span>
+            <div class="tab-content">
+                <div class="tab-pane fade show active" id="dsp-props" role="tabpanel" aria-labelledby="dsp-tab-props">
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label" for="display-title">Judul halaman</label>
+                            <input class="form-control" id="display-title" maxlength="@ModuleDisplay.MaxTitleLength" placeholder="kosong = nama module" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="display-placeholder">Placeholder pencarian</label>
+                            <input class="form-control" id="display-placeholder" maxlength="@ModuleDisplay.MaxSearchPlaceholderLength" placeholder="kosong = Cari..." />
+                        </div>
+                    </div>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-3">
+                            <label class="form-label" for="take">Baris per halaman</label>
+                            <input class="form-control" type="number" id="take" min="1" max="1000" value="10" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label" for="maxTake">Maksimum per halaman</label>
+                            <input class="form-control" type="number" id="maxTake" min="1" max="1000" value="100" />
+                            <div class="form-text">Batas yang boleh diminta pengunjung (maks 1000).</div>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label" for="keyField">Kolom kunci</label>
+                            <input class="form-control" id="keyField" list="key-columns" maxlength="128" placeholder="mis. Id" />
+                            <datalist id="key-columns"></datalist>
+                            <div class="form-text">Kolom list yang berisi kunci record. Wajib bila ada aksi Detail, Ubah, atau Hapus.</div>
+                        </div>
+                    </div>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <div class="border rounded p-3 h-100">
+                                <h2 class="h6">Tombol</h2>
+                                <div class="row row-cols-2 g-1">
+                                    <div class="form-check"><input class="form-check-input" type="checkbox" id="btn-search" /><label class="form-check-label" for="btn-search">Cari</label></div>
+                                    <div class="form-check"><input class="form-check-input" type="checkbox" id="btn-filter" /><label class="form-check-label" for="btn-filter">Filter</label></div>
+                                    <div class="form-check"><input class="form-check-input" type="checkbox" id="btn-add" /><label class="form-check-label" for="btn-add">Tambah</label></div>
+                                    <div class="form-check"><input class="form-check-input" type="checkbox" id="btn-edit" /><label class="form-check-label" for="btn-edit">Ubah</label></div>
+                                    <div class="form-check"><input class="form-check-input" type="checkbox" id="btn-delete" /><label class="form-check-label" for="btn-delete">Hapus</label></div>
+                                    <div class="form-check"><input class="form-check-input" type="checkbox" id="btn-detail" /><label class="form-check-label" for="btn-detail">Detail (Lihat)</label></div>
+                                </div>
+                                <div class="form-text">
+                                    Tambah, Ubah, dan Hapus tetap butuh data source-nya dan <code>Rakit:Db:AllowWrite</code>; mencentangnya saja tidak mengaktifkan.
+                                    Detail menambah tombol <em>Lihat</em> per baris (baca saja) dan butuh data source Detail dan kolom kunci.
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="border rounded p-3 h-100">
+                                <h2 class="h6">Menu (titik tiga)</h2>
+                                <div class="row row-cols-2 g-1">
+                                    <div class="form-check"><input class="form-check-input" type="checkbox" id="menu-refresh-opt" /><label class="form-check-label" for="menu-refresh-opt">Muat ulang</label></div>
+                                    <div class="form-check"><input class="form-check-input" type="checkbox" id="menu-export-opt" /><label class="form-check-label" for="menu-export-opt">Export halaman (CSV)</label></div>
+                                    <div class="form-check"><input class="form-check-input" type="checkbox" id="menu-exportAll-opt" /><label class="form-check-label" for="menu-exportAll-opt">Export semua (CSV)</label></div>
+                                    <div class="form-check"><input class="form-check-input" type="checkbox" id="menu-import-opt" /><label class="form-check-label" for="menu-import-opt">Import (CSV)</label></div>
+                                </div>
+                                <div class="form-text">
+                                    Export semua membaca sampai @ModuleExport.MaxRows.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) baris yang cocok dengan pencarian dan filter.
+                                    Import butuh data source Insert dan field form: tiap baris file disimpan lewat Insert dengan validasi form yang sama (maks @ModuleExport.MaxImportRows baris).
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <div id="columns"></div>
-                <div class="form-text">
-                    Tanpa kolom, semua kolom hasil ditampilkan apa adanya (tanpa sort). Urutan di sini = urutan di halaman.
-                    Sort hanya berlaku untuk kolom yang dicentang <em>sortable</em>. Kolom yang tidak lagi dikembalikan data source tetap tampil kosong.
+
+                <div class="tab-pane fade" id="dsp-columns" role="tabpanel" aria-labelledby="dsp-tab-columns">
+                    <div class="border rounded p-3 mb-3">
+                        <h2 class="h5">Kolom</h2>
+                        <div class="mb-2">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="load-columns">Muat kolom dari data source</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="add-column">+ Kolom</button>
+                            <span id="columns-status" class="ms-2 small text-muted" aria-live="polite"></span>
+                        </div>
+                        <div id="columns"></div>
+                        <div class="form-text">
+                            Tanpa kolom, semua kolom hasil ditampilkan apa adanya (tanpa sort). Urutan di sini = urutan di halaman.
+                            Sort hanya berlaku untuk kolom yang dicentang <em>sortable</em>. Kolom yang tidak lagi dikembalikan data source tetap tampil kosong.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tab-pane fade" id="dsp-filters" role="tabpanel" aria-labelledby="dsp-tab-filters">
+                    <div class="border rounded p-3 mb-3">
+                        <h2 class="h5">Filter</h2>
+                        <p class="small text-muted mb-2">
+                            Tiap filter menjadi satu isian di panel <em>Filter</em> halaman. Nilainya dikirim lewat query string dengan <strong>nama</strong> filter itu
+                            (jadi bisa di-bookmark dan ikut Export); data source yang menyaringnya: di data source mode Table, tambahkan filter pada kolom dan petakan
+                            parameternya ke <code>QueryString</code> dengan key yang sama. Perbandingan (sama dengan, mengandung, lebih besar, ...) ditentukan data source, bukan di sini.
+                            Isian kosong tidak dikirim.
+                        </p>
+                        <div class="mb-2">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="add-filter">+ Filter</button>
+                            <span class="small text-muted ms-2" id="filters-status" aria-live="polite"></span>
+                        </div>
+                        <div id="filters"></div>
+                        <div class="form-text">
+                            Tipe <strong>select</strong> memakai opsi tetap (satu per baris: <code>nilai|teks</code>) atau data source lookup (Query atau Table) dengan kolom nilai dan kolom teks.
+                            Maksimal @ModuleFilter.MaxPerModule filter. Peringatan muncul saat menyimpan bila data source List tidak punya parameter dengan nama filter.
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -353,8 +438,11 @@
                 <div id="fields"></div>
                 <div class="form-text">
                     Saran field membaca kolom data source Detail (lewat jalur preview, tanpa menyimpan apa pun); dengan kunci contoh, tipe ditebak dari nilainya.
-                    Kolom kunci tidak disarankan. Tanggal ditulis <code>yyyy-MM-dd</code> pada <em>default</em>. MaxLength dan Regex untuk text, textarea, select, dan browse;
+                    Kolom kunci tidak disarankan. Tanggal ditulis <code>yyyy-MM-dd</code> pada <em>default</em>. MaxLength dan Regex untuk text, textarea, select, browse, email, dan url;
                     Regex harus cocok dengan seluruh nilai.
+                    <br />
+                    Baris kedua dan ketiga tiap field: <strong>placeholder</strong>, <strong>teks bantuan</strong>, <strong>ukuran kolom</strong> (dari 12 kolom, untuk membuat form berjajar), <strong>min / maks / step</strong> (number, date, dateTime), dan <strong>opsi tetap</strong> untuk Select (<code>nilai|teks</code> per baris, tanpa data source).
+                    Tipe <strong>Seksi</strong> hanya judul pemisah antar field (dan teks bantuan di bawahnya), bukan field data.
                     <br />
                     <strong>Select</strong> = dropdown (sampai 200 pilihan), <strong>Browse</strong> = modal cari dan pilih (per 50). Keduanya mengambil pilihan dari data source
                     Query (yang sama dengan daftar data source List): kolom <em>nilai</em> yang disimpan sebagai teks dan kolom <em>teks</em> yang dibaca pengguna. Data source
@@ -614,11 +702,11 @@
                     </div>
                     <div class="table-responsive" style="max-height: 24rem; overflow: auto">
                         <table class="table table-sm align-middle mb-0" id="wizard-columns">
-                            <thead><tr><th style="width: 2.5rem"></th><th>Kolom</th><th>Tipe</th><th>Ciri</th><th>Keterangan</th></tr></thead>
+                            <thead><tr><th style="width: 2.5rem"></th><th>Kolom</th><th>Tipe</th><th>Ciri</th><th class="text-center" title="Jadi isian filter di halaman">Filter</th><th>Keterangan</th></tr></thead>
                             <tbody></tbody>
                         </table>
                     </div>
-                    <div class="form-text">Kolom yang dicentang tampil di list dan masuk ke data source. Kolom kunci selalu ikut.</div>
+                    <div class="form-text">Kolom yang dicentang tampil di list dan masuk ke data source. Kolom kunci selalu ikut. <strong>Filter</strong> membuat isian di panel Filter halaman (teks = mengandung, lainnya = sama dengan) dan filter di data source List.</div>
                 </div>
 
                 <div id="wizard-step-3" class="d-none">

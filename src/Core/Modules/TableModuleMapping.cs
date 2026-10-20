@@ -53,6 +53,17 @@ public static partial class TableModuleMapping
 
     public static bool IsWritableType(string baseType) => IsListable(baseType) && !NotWritable.Contains(baseType);
 
+    /// <summary>Types a generated filter can compare with one value: text (contains), numbers, date, bit and guid (equals).</summary>
+    public static bool IsFilterable(string baseType)
+        => baseType is "char" or "varchar" or "nchar" or "nvarchar" or "date" or "bit" or "uniqueidentifier" || Numbers.Contains(baseType);
+
+    /// <summary>The query-string name of a column's generated filter ("f_" + the column), or null when the name does not fit.</summary>
+    public static string? FilterName(string column)
+    {
+        var name = "f_" + column;
+        return PlainName().IsMatch(name) && name.Length <= ModuleFilter.MaxNameLength ? name : null;
+    }
+
     public static bool IsPlainName(string name) => PlainName().IsMatch(name) && name.Length <= ModuleInputValidator.MaxFieldLength;
 
     /// <summary>camelCase display format name: text, number, date, dateTime, boolean.</summary>

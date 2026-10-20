@@ -431,6 +431,8 @@ public class ModuleController(
         foreach (var e in recordProblems) ModelState.AddModelError("", e);
         if (recordProblems.Count > 0) return null;
 
+        await NoteFilterParametersAsync(config, model.Type, ct);
+
         var actionProblems = await ActionProblemsAsync(config, ct);
         foreach (var e in actionProblems) ModelState.AddModelError("", e);
         if (actionProblems.Count > 0) return null;
@@ -514,6 +516,21 @@ public class ModuleController(
         StatementType? KindOf(Guid id) => kinds.TryGetValue(id, out var kind) ? kind : null;
         return [.. ModuleInputValidator.ValidateRecordSourceKinds(source, KindOf),
                 .. ModuleInputValidator.ValidateLookupSourceKinds(config.Form.Fields, KindOf)];
+    }
+
+    /// <summary>
+    /// A filter only does something when the List data source maps a parameter of the same name (the query string is where its
+    /// value travels). Not an error (a data source may read the query string in other ways), so only a remark with the success message.
+    /// </summary>
+    private async Task NoteFilterParametersAsync(ModuleConfig config, ModuleType type, CancellationToken ct)
+    {
+        if (type != ModuleType.Table || config.Display.Filters.Count == 0 || config.Source.List is not { } list) return;
+        var ds = await dataSources.GetAsync(list.DataSourceId, ct);
+        if (ds is null) return;
+
+        var mapped = new HashSet<string>(ds.Definition.Parameters.Select(p => p.Name.Trim()), StringComparer.OrdinalIgnoreCase);
+        foreach (var filter in config.Display.Filters.Where(f => !mapped.Contains(f.Name.Trim())))
+            notes.Add($"Catatan: filter '{filter.Name.Trim()}' tidak punya parameter bernama sama di data source List ('{ds.Code}'), jadi belum menyaring apa pun.");
     }
 
     /// <summary>

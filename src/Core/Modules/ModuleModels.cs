@@ -27,8 +27,18 @@ public sealed class ModuleSource
     public DataSourceRef? Delete { get; set; }
 }
 
-/// <summary>Serialised camelCase: text, textarea, number, date, dateTime, boolean, select, browse.</summary>
-public enum FormFieldType { Text, Textarea, Number, Date, DateTime, Boolean, Select, Browse }
+/// <summary>
+/// Serialised camelCase: text, textarea, number, date, dateTime, boolean, select, browse, email, url, section.
+/// A <see cref="Section"/> is a heading between fields, not a field: it carries no value.
+/// </summary>
+public enum FormFieldType { Text, Textarea, Number, Date, DateTime, Boolean, Select, Browse, Email, Url, Section }
+
+/// <summary>A fixed choice of a select field or filter (instead of a lookup data source).</summary>
+public sealed class ModuleOption
+{
+    public string Value { get; set; } = "";
+    public string? Text { get; set; }
+}
 
 /// <summary>
 /// Where the choices of a <see cref="FormFieldType.Select"/> / <see cref="FormFieldType.Browse"/> field come from: a Query
@@ -68,8 +78,35 @@ public sealed class ModuleFormField
     /// <summary>Shown but never accepted from the client.</summary>
     public bool Readonly { get; set; }
 
-    /// <summary>Select and browse fields only (and required for them).</summary>
+    /// <summary>Select and browse fields (a select may use <see cref="Options"/> instead).</summary>
     public ModuleLookup? Lookup { get; set; }
+
+    public const int MaxPlaceholderLength = 200;
+    public const int MaxHelpLength = 300;
+    public const int MaxOptions = 200;
+
+    /// <summary>Grey hint inside an empty input.</summary>
+    public string? Placeholder { get; set; }
+
+    /// <summary>Small text under the input; for a section, the text under the heading.</summary>
+    public string? Help { get; set; }
+
+    /// <summary>Width on a wide screen in Bootstrap's 12 columns (1-12); null = the whole row.</summary>
+    public int? ColSize { get; set; }
+
+    /// <summary>Number, date and dateTime fields: smallest and largest accepted value, written as it would be typed.</summary>
+    public string? Min { get; set; }
+    public string? Max { get; set; }
+
+    /// <summary>Number fields: the step of the input (a number above 0).</summary>
+    public string? Step { get; set; }
+
+    /// <summary>Select fields: fixed choices. When filled, the field needs no lookup and only these values are accepted.</summary>
+    public List<ModuleOption>? Options { get; set; }
+
+    /// <summary>A heading, not a data field.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsSection => Type == FormFieldType.Section;
 }
 
 /// <summary>
@@ -157,6 +194,10 @@ public sealed class ModulePage
 public sealed class ModuleForm
 {
     public List<ModuleFormField> Fields { get; set; } = [];
+
+    /// <summary>The fields that hold a value (everything but the section headings), in order.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IEnumerable<ModuleFormField> DataFields => Fields.Where(f => !f.IsSection);
 }
 
 public sealed class ModuleColumn
@@ -172,11 +213,88 @@ public sealed class ModuleColumn
     public ColumnFormat Format { get; set; } = ColumnFormat.Text;
 }
 
+/// <summary>Which controls the runtime page offers. Everything but Detail is on by default (the page always had them).</summary>
+public sealed class ModuleButtons
+{
+    public bool Search { get; set; } = true;
+
+    /// <summary>The filter panel button; only shown when the module has filters.</summary>
+    public bool Filter { get; set; } = true;
+
+    public bool Add { get; set; } = true;
+    public bool Edit { get; set; } = true;
+    public bool Delete { get; set; } = true;
+
+    /// <summary>A read-only "Lihat" button on every row (needs the Detail data source and the key column).</summary>
+    public bool Detail { get; set; }
+}
+
+/// <summary>The page's "more" menu. All off by default.</summary>
+public sealed class ModuleMenu
+{
+    public bool Refresh { get; set; }
+
+    /// <summary>CSV of the rows on the page.</summary>
+    public bool Export { get; set; }
+
+    /// <summary>CSV of every row that matches the search and filters (up to <see cref="ModuleExport.MaxRows"/>).</summary>
+    public bool ExportAll { get; set; }
+
+    /// <summary>CSV upload, one Insert per row (needs the Insert data source and at least one form field).</summary>
+    public bool Import { get; set; }
+}
+
+/// <summary>Limits of the CSV export and import of a Table module.</summary>
+public static class ModuleExport
+{
+    public const int MaxRows = 10_000;
+    public const int ChunkRows = ModuleDisplay.HardMaxTake;
+    public const int MaxImportRows = 500;
+    public const int MaxImportBytes = 1_048_576;
+}
+
+/// <summary>
+/// An input of the filter panel. Its <see cref="Name"/> is the query-string key the value travels under (and what the data
+/// source maps a parameter to); which comparison is made is up to the data source. A select filter takes its choices from a
+/// lookup data source or from fixed <see cref="Options"/>.
+/// </summary>
+public sealed class ModuleFilter
+{
+    public const int MaxPerModule = 10;
+    public const int MaxNameLength = 64;
+    public const int MaxLabelLength = 100;
+
+    /// <summary>The filter types: <see cref="FormFieldType"/> restricted to these.</summary>
+    public static readonly IReadOnlyList<FormFieldType> Types =
+        [FormFieldType.Text, FormFieldType.Number, FormFieldType.Date, FormFieldType.DateTime, FormFieldType.Boolean, FormFieldType.Select];
+
+    public string Name { get; set; } = "";
+    public string? Label { get; set; }
+    public FormFieldType Type { get; set; } = FormFieldType.Text;
+    public string? Placeholder { get; set; }
+    public ModuleLookup? Lookup { get; set; }
+    public List<ModuleOption>? Options { get; set; }
+}
+
 public sealed class ModuleDisplay
 {
     public const int DefaultTake = 10;
     public const int DefaultMaxTake = 100;
     public const int HardMaxTake = 1000;
+    public const int MaxTitleLength = 200;
+    public const int MaxSearchPlaceholderLength = 100;
+
+    /// <summary>Heading of the page; blank = the module's name.</summary>
+    public string? Title { get; set; }
+
+    /// <summary>Hint in the search box; blank = "Cari...".</summary>
+    public string? SearchPlaceholder { get; set; }
+
+    public ModuleButtons Buttons { get; set; } = new();
+    public ModuleMenu Menu { get; set; } = new();
+
+    /// <summary>The filter panel, in order.</summary>
+    public List<ModuleFilter> Filters { get; set; } = [];
 
     public int Take { get; set; } = DefaultTake;
 
@@ -195,16 +313,24 @@ public sealed class ModuleDisplay
 /// (the data source service refuses Command statements without it anyway, so the buttons would only fail).
 /// Edit needs both Detail (to fill the form) and Update.
 /// </summary>
-public sealed record ModuleRecordActions(bool CanAdd, bool CanEdit, bool CanDelete)
+public sealed record ModuleRecordActions(bool CanAdd, bool CanEdit, bool CanDelete, bool CanView = false, bool CanImport = false)
 {
+    /// <summary>
+    /// The page's <c>display.buttons</c> can switch a button off but never on: a data source and (for writes) the AllowWrite flag are
+    /// still needed. "Lihat" needs only the Detail data source and the key; Import is a menu item, independent of the Tambah button.
+    /// </summary>
     public static ModuleRecordActions For(ModuleConfig config, bool allowWrite)
     {
         var source = config.Source;
+        var buttons = config.Display.Buttons;
+        var hasFields = config.Form.DataFields.Any();
+        var hasKey = !string.IsNullOrWhiteSpace(config.Display.KeyField);
         return new ModuleRecordActions(
-            CanAdd: allowWrite && source.Insert is not null && config.Form.Fields.Count > 0,
-            CanEdit: allowWrite && source.Update is not null && source.Detail is not null && config.Form.Fields.Count > 0
-                     && !string.IsNullOrWhiteSpace(config.Display.KeyField),
-            CanDelete: allowWrite && source.Delete is not null && !string.IsNullOrWhiteSpace(config.Display.KeyField));
+            CanAdd: allowWrite && buttons.Add && source.Insert is not null && hasFields,
+            CanEdit: allowWrite && buttons.Edit && source.Update is not null && source.Detail is not null && hasFields && hasKey,
+            CanDelete: allowWrite && buttons.Delete && source.Delete is not null && hasKey,
+            CanView: buttons.Detail && source.Detail is not null && hasKey,
+            CanImport: allowWrite && config.Display.Menu.Import && source.Insert is not null && hasFields);
     }
 }
 

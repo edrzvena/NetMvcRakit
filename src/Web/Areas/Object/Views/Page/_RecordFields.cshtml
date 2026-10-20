@@ -1,13 +1,41 @@
+@using System.Globalization
 @using Rakit.Core.Modules
 @model IReadOnlyList<ModuleFormField>
-@* The inputs of a record form, one group per configured field. Shared by the Table add/edit modal (and later the Form module page).
-   The script finds them by data-field: `data-default` is the initial value, `data-lookup` marks a select / browse field. *@
+@* The inputs of a record form, one group per configured field, laid out on Bootstrap's 12-column grid (colSize, default the whole row).
+   Shared by the Table add/edit modal and the Form module page. The script finds the inputs by data-field: `data-default` is the
+   initial value, `data-lookup` marks a select / browse field that reads its choices from a lookup (a select with fixed options has none).
+   A section is a heading between fields and carries no data-field. *@
+@functions {
+    // min / max of a datetime-local input must be written yyyy-MM-ddTHH:mm; the config holds what the builder typed
+    static string? InputBound(FormFieldType type, string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        if (type == FormFieldType.DateTime && DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var d))
+            return d.ToString("yyyy-MM-dd'T'HH:mm", CultureInfo.InvariantCulture);
+        return text.Trim();
+    }
+}
+<div class="row">
 @foreach (var field in Model)
 {
     var name = field.Name.Trim();
     var id = "rf-" + name;
     var label = string.IsNullOrWhiteSpace(field.Label) ? name : field.Label.Trim();
-    <div class="mb-3" data-group>
+    var width = "col-12" + (field.ColSize is >= 1 and <= 11 ? " col-md-" + field.ColSize : "");
+
+    if (field.IsSection)
+    {
+        <div class="col-12" data-section>
+            <h2 class="h6 border-bottom pb-1 mt-2 mb-2">@label</h2>
+            @if (!string.IsNullOrWhiteSpace(field.Help))
+            {
+                <p class="small text-muted">@field.Help</p>
+            }
+        </div>
+        continue;
+    }
+
+    <div class="@width mb-3" data-group>
         @if (field.Type == FormFieldType.Boolean)
         {
             <div class="form-check">
@@ -16,6 +44,10 @@
                 <label class="form-check-label" for="@id">@label</label>
                 <div class="invalid-feedback"></div>
             </div>
+            @if (!string.IsNullOrWhiteSpace(field.Help))
+            {
+                <div class="form-text">@field.Help</div>
+            }
         }
         else
         {
@@ -23,7 +55,19 @@
             @if (field.Type == FormFieldType.Textarea)
             {
                 <textarea class="form-control" id="@id" name="@name" rows="3" data-field="@name" data-default="@field.Default"
-                          maxlength="@field.MaxLength" disabled="@field.Readonly"></textarea>
+                          maxlength="@field.MaxLength" placeholder="@field.Placeholder" disabled="@field.Readonly"></textarea>
+                <div class="invalid-feedback"></div>
+            }
+            else if (field.Type == FormFieldType.Select && field.Options is { Count: > 0 })
+            {
+                @* Fixed choices, written in the page: nothing to load. *@
+                <select class="form-select" id="@id" name="@name" data-field="@name" data-default="@field.Default" disabled="@field.Readonly">
+                    <option value="">- pilih -</option>
+                    @foreach (var option in field.Options)
+                    {
+                        <option value="@option.Value.Trim()">@(string.IsNullOrWhiteSpace(option.Text) ? option.Value.Trim() : option.Text.Trim())</option>
+                    }
+                </select>
                 <div class="invalid-feedback"></div>
             }
             else if (field.Type == FormFieldType.Select)
@@ -41,7 +85,7 @@
                 @* The input holds the value that is sent; the picked text is only shown beneath it. *@
                 <div class="input-group has-validation">
                     <input class="form-control" type="text" id="@id" name="@name" data-field="@name" data-default="@field.Default" data-lookup="browse"
-                           readonly disabled="@field.Readonly" autocomplete="off" />
+                           placeholder="@field.Placeholder" readonly disabled="@field.Readonly" autocomplete="off" />
                     <button type="button" class="btn btn-outline-secondary" data-lookup-pick disabled="@field.Readonly">Cari</button>
                     <button type="button" class="btn btn-outline-secondary" data-lookup-clear title="Kosongkan" aria-label="Kosongkan" disabled="@field.Readonly">&times;</button>
                     <div class="invalid-feedback"></div>
@@ -55,13 +99,23 @@
                     FormFieldType.Number => "number",
                     FormFieldType.Date => "date",
                     FormFieldType.DateTime => "datetime-local",
+                    FormFieldType.Email => "email",
+                    FormFieldType.Url => "url",
                     _ => "text",
                 };
+                var range = ModuleFieldValue.HasRange(field.Type);
                 <input class="form-control" type="@inputType" id="@id" name="@name" data-field="@name" data-default="@field.Default"
-                       step="@(field.Type == FormFieldType.Number ? "any" : null)" maxlength="@field.MaxLength"
+                       step="@(field.Type == FormFieldType.Number ? (string.IsNullOrWhiteSpace(field.Step) ? "any" : field.Step.Trim()) : null)"
+                       min="@(range ? InputBound(field.Type, field.Min) : null)" max="@(range ? InputBound(field.Type, field.Max) : null)"
+                       maxlength="@field.MaxLength" placeholder="@field.Placeholder"
                        disabled="@field.Readonly" autocomplete="off" />
                 <div class="invalid-feedback"></div>
+            }
+            @if (!string.IsNullOrWhiteSpace(field.Help))
+            {
+                <div class="form-text">@field.Help</div>
             }
         }
     </div>
 }
+</div>

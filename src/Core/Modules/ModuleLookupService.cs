@@ -33,6 +33,16 @@ public interface IModuleLookupService
     /// <exception cref="SqlExecutionException"/>
     Task<ModuleLookupResult> SearchAsync(
         Guid moduleId, string fieldName, ParameterContext context, ModuleLookupRequest? request = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// The choices of a select filter (display.filters) that reads them from a lookup data source; same rules as
+    /// <see cref="SearchAsync"/> (a Query, a fresh context, a select's 200 choices).
+    /// </summary>
+    /// <exception cref="ModuleNotFoundException"/>
+    /// <exception cref="ModuleRecordUnavailableException">No such select filter with a lookup (<c>NotConfigured</c>), or it cannot run.</exception>
+    /// <exception cref="SqlExecutionException"/>
+    Task<ModuleLookupResult> SearchFilterAsync(
+        Guid moduleId, string filterName, ParameterContext context, ModuleLookupRequest? request = null, CancellationToken ct = default);
 }
 
 public sealed class ModuleLookupService(
@@ -49,14 +59,11 @@ public sealed class ModuleLookupService(
         Guid moduleId, string fieldName, ParameterContext context, ModuleLookupRequest? request = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(context);
-        request ??= new ModuleLookupRequest();
-
-        var module = await modules.GetAsync(moduleId, ct);
-        if (module is null || module.Status != ModuleStatus.Published) throw new ModuleNotFoundException(moduleId);
+        var module = await GetPublishedAsync(moduleId, ct);
 
         var name = fieldName?.Trim() ?? "";
         var field = name.Length is > 0 and <= MaxFieldNameLength
-            ? module.Config.Form.Fields.FirstOrDefault(f =>
+            ? module.Config.Form.DataFields.FirstOrDefault(f =>
                 ModuleFieldValue.IsLookup(f.Type) && f.Lookup is not null
                 && string.Equals(f.Name.Trim(), name, StringComparison.OrdinalIgnoreCase))
             : null;
@@ -64,7 +71,37 @@ public sealed class ModuleLookupService(
             throw new ModuleRecordUnavailableException(
                 "Pilihan ini tidak tersedia.", $"the module has no select/browse field '{name}' with a lookup", notConfigured: true);
 
-        var browse = field.Type == FormFieldType.Browse;
+        return await RunAsync(module, name, lookup, field.Type == FormFieldType.Browse, context, request ?? new ModuleLookupRequest(), ct);
+    }
+
+    public async Task<ModuleLookupResult> SearchFilterAsync(
+        Guid moduleId, string filterName, ParameterContext context, ModuleLookupRequest? request = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var module = await GetPublishedAsync(moduleId, ct);
+
+        var name = filterName?.Trim() ?? "";
+        var filter = name.Length is > 0 and <= MaxFieldNameLength
+            ? module.Config.Display.Filters.FirstOrDefault(f =>
+                f.Type == FormFieldType.Select && f.Lookup is not null && string.Equals(f.Name.Trim(), name, StringComparison.OrdinalIgnoreCase))
+            : null;
+        if (filter?.Lookup is not { } lookup || lookup.DataSourceId == Guid.Empty)
+            throw new ModuleRecordUnavailableException(
+                "Pilihan ini tidak tersedia.", $"the module has no select filter '{name}' with a lookup", notConfigured: true);
+
+        return await RunAsync(module, "filter:" + name, lookup, browse: false, context, request ?? new ModuleLookupRequest(), ct);
+    }
+
+    private async Task<Module> GetPublishedAsync(Guid moduleId, CancellationToken ct)
+    {
+        var module = await modules.GetAsync(moduleId, ct);
+        if (module is null || module.Status != ModuleStatus.Published) throw new ModuleNotFoundException(moduleId);
+        return module;
+    }
+
+    private async Task<ModuleLookupResult> RunAsync(
+        Module module, string name, ModuleLookup lookup, bool browse, ParameterContext context, ModuleLookupRequest request, CancellationToken ct)
+    {
         var maxTake = browse ? BrowseMaxTake : SelectMaxTake;
         var take = Math.Clamp(request.Take ?? (browse ? BrowseDefaultTake : SelectDefaultTake), 1, maxTake);
         var skip = Math.Max(request.Skip ?? 0, 0);

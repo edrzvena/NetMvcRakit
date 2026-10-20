@@ -159,6 +159,101 @@ public static partial class ModuleInputValidator
             if (!Enum.IsDefined(column.Format))
                 errors.Add($"Format kolom '{Shorten(field)}' tidak dikenal.");
         }
+
+        if (display.Title is { Length: > ModuleDisplay.MaxTitleLength })
+            errors.Add($"Judul halaman maksimal {ModuleDisplay.MaxTitleLength} karakter.");
+        if (display.SearchPlaceholder is { Length: > ModuleDisplay.MaxSearchPlaceholderLength })
+            errors.Add($"Placeholder pencarian maksimal {ModuleDisplay.MaxSearchPlaceholderLength} karakter.");
+        ValidateFilters(display.Filters ?? [], errors);
+    }
+
+    [GeneratedRegex(@"^[A-Za-z][A-Za-z0-9_]{0,63}$")]
+    private static partial Regex FilterNamePattern();
+
+    /// <summary>The filter panel: unique query-string names, a known type, and for a select its choices (lookup or fixed options).</summary>
+    private static void ValidateFilters(IReadOnlyList<ModuleFilter> filters, List<string> errors)
+    {
+        if (filters.Count > ModuleFilter.MaxPerModule)
+            errors.Add($"Satu module maksimal {ModuleFilter.MaxPerModule} filter.");
+
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < filters.Count && i < ModuleFilter.MaxPerModule; i++)
+        {
+            var filter = filters[i];
+            var name = filter.Name?.Trim() ?? "";
+            var title = $"Filter {i + 1}" + (name.Length > 0 ? $" ('{Shorten(name)}')" : "");
+
+            if (!FilterNamePattern().IsMatch(name))
+                errors.Add($"{title}: nama harus huruf/angka/_ (diawali huruf), maksimal {ModuleFilter.MaxNameLength} karakter.");
+            else if (!names.Add(name))
+                errors.Add($"{title}: nama dipakai lebih dari sekali.");
+
+            if (filter.Label is { Length: > ModuleFilter.MaxLabelLength })
+                errors.Add($"{title}: label maksimal {ModuleFilter.MaxLabelLength} karakter.");
+            if (filter.Placeholder is { Length: > ModuleFormField.MaxPlaceholderLength })
+                errors.Add($"{title}: placeholder maksimal {ModuleFormField.MaxPlaceholderLength} karakter.");
+            if (!ModuleFilter.Types.Contains(filter.Type))
+            {
+                errors.Add($"{title}: tipe harus salah satu dari text, number, date, dateTime, boolean, select.");
+                continue;
+            }
+
+            var hasOptions = filter.Options is { Count: > 0 };
+            if (filter.Type != FormFieldType.Select)
+            {
+                if (filter.Lookup is not null || hasOptions) errors.Add($"{title}: pilihan hanya untuk tipe select.");
+            }
+            else if (hasOptions && filter.Lookup is not null)
+            {
+                errors.Add($"{title}: pilih salah satu, lookup atau opsi tetap.");
+            }
+            else if (hasOptions)
+            {
+                CheckOptions(filter.Options, title, errors);
+            }
+            else
+            {
+                CheckLookup(filter.Lookup, title, errors);
+            }
+        }
+    }
+
+    /// <summary>Fixed choices: at most <see cref="ModuleFormField.MaxOptions"/>, each with a distinct non-blank value.</summary>
+    private static void CheckOptions(IReadOnlyList<ModuleOption>? options, string title, List<string> errors)
+    {
+        if (options is null || options.Count == 0)
+        {
+            errors.Add($"{title}: opsi tetap belum diisi.");
+            return;
+        }
+        if (options.Count > ModuleFormField.MaxOptions)
+            errors.Add($"{title}: maksimal {ModuleFormField.MaxOptions} opsi.");
+
+        var values = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var option in options.Take(ModuleFormField.MaxOptions))
+        {
+            var value = option.Value?.Trim() ?? "";
+            if (value.Length == 0) errors.Add($"{title}: nilai opsi tidak boleh kosong.");
+            else if (value.Length > MaxFieldTextLength) errors.Add($"{title}: nilai opsi maksimal {MaxFieldTextLength} karakter.");
+            else if (!values.Add(value)) errors.Add($"{title}: nilai opsi '{Shorten(value)}' dipakai lebih dari sekali.");
+            if (option.Text is { Length: > MaxLabelLength }) errors.Add($"{title}: teks opsi maksimal {MaxLabelLength} karakter.");
+        }
+    }
+
+    /// <summary>A lookup needs a data source and both column names.</summary>
+    private static void CheckLookup(ModuleLookup? lookup, string title, List<string> errors)
+    {
+        if (lookup is null || lookup.DataSourceId == Guid.Empty)
+        {
+            errors.Add($"{title}: membutuhkan lookup dengan data source (atau opsi tetap).");
+            return;
+        }
+        foreach (var (what, value) in new[] { ("ValueField", lookup.ValueField), ("TextField", lookup.TextField) })
+        {
+            var text = value?.Trim() ?? "";
+            if (text.Length == 0) errors.Add($"{title}: {what} lookup wajib diisi.");
+            else if (text.Length > MaxLookupFieldLength) errors.Add($"{title}: {what} lookup maksimal {MaxLookupFieldLength} karakter.");
+        }
     }
 
     private static void ValidateRecordActions(ModuleConfig config, List<string> errors)
@@ -180,9 +275,15 @@ public static partial class ModuleInputValidator
         if (source?.Update is not null && source.Detail is null)
             errors.Add("Update membutuhkan Detail: form ubah diisi dari data source Detail.");
 
-        if ((config.Form?.Fields.Count ?? 0) == 0 && (source?.Insert is not null || source?.Update is not null))
+        var hasDataFields = config.Form?.DataFields.Any() ?? false;
+        if (!hasDataFields && (source?.Insert is not null || source?.Update is not null))
             errors.Add("Insert atau Update membutuhkan setidaknya satu field form.");
         ValidateFormFields(config, errors);
+
+        if (config.Display?.Buttons.Detail == true && (source?.Detail is null || string.IsNullOrEmpty(keyField)))
+            errors.Add("Tombol Detail membutuhkan data source Detail dan kolom kunci.");
+        if (config.Display?.Menu.Import == true && (source?.Insert is null || !hasDataFields))
+            errors.Add("Menu Import membutuhkan data source Insert dan setidaknya satu field form.");
     }
 
     private static void ValidateFormFields(ModuleConfig config, List<string> errors)
@@ -204,7 +305,7 @@ public static partial class ModuleInputValidator
             errors.Add("Module Form membutuhkan data source Insert.");
         if (source?.List is not null || source?.Detail is not null || source?.Update is not null || source?.Delete is not null)
             errors.Add("Module Form hanya memakai data source Insert.");
-        if ((config.Form?.Fields.Count ?? 0) == 0)
+        if (!(config.Form?.DataFields.Any() ?? false))
             errors.Add("Module Form membutuhkan setidaknya satu field form.");
         ValidateFormFields(config, errors);
     }
@@ -324,13 +425,28 @@ public static partial class ModuleInputValidator
             return;
         }
 
+        if (field.Placeholder is { Length: > ModuleFormField.MaxPlaceholderLength })
+            errors.Add($"Placeholder field '{name}' maksimal {ModuleFormField.MaxPlaceholderLength} karakter.");
+        if (field.Help is { Length: > ModuleFormField.MaxHelpLength })
+            errors.Add($"Teks bantuan field '{name}' maksimal {ModuleFormField.MaxHelpLength} karakter.");
+        if (field.ColSize is < 1 or > 12)
+            errors.Add($"Ukuran kolom field '{name}' harus antara 1 dan 12.");
+
+        // A section is a heading: it needs a caption and holds no value, so nothing else about it is judged.
+        if (field.IsSection)
+        {
+            if (string.IsNullOrWhiteSpace(field.Label)) errors.Add($"Judul seksi '{name}' wajib diisi (label).");
+            return;
+        }
+
         ValidateLookup(field, name, errors);
+        ValidateRange(field, name, errors);
 
         var isText = ModuleFieldValue.IsText(field.Type);
         if (field.MaxLength is { } max)
         {
             if (!isText)
-                errors.Add($"MaxLength field '{name}' hanya untuk tipe text, textarea, select, atau browse.");
+                errors.Add($"MaxLength field '{name}' hanya untuk tipe text, textarea, select, browse, email, atau url.");
             else if (max < 1 || max > MaxFieldTextLength)
                 errors.Add($"MaxLength field '{name}' harus antara 1 dan {MaxFieldTextLength}.");
         }
@@ -338,7 +454,7 @@ public static partial class ModuleInputValidator
         if (!string.IsNullOrEmpty(field.Regex))
         {
             if (!isText)
-                errors.Add($"Regex field '{name}' hanya untuk tipe text, textarea, select, atau browse.");
+                errors.Add($"Regex field '{name}' hanya untuk tipe text, textarea, select, browse, email, atau url.");
             else if (field.Regex.Length > MaxRegexLength)
                 errors.Add($"Regex field '{name}' maksimal {MaxRegexLength} karakter.");
             else if (!IsCompilable(field.Regex))
@@ -351,32 +467,64 @@ public static partial class ModuleInputValidator
                 errors.Add($"Default field '{name}' maksimal {MaxFieldTextLength} karakter.");
             else if (!ModuleFieldValue.IsValid(field.Type, field.Default))
                 errors.Add($"Default field '{name}' tidak cocok dengan tipe {field.Type.ToString().ToLowerInvariant()}.");
+            else if (field.Type == FormFieldType.Select && field.Options is { Count: > 0 }
+                     && field.Options.All(o => !string.Equals(o.Value?.Trim(), field.Default, StringComparison.Ordinal)))
+                errors.Add($"Default field '{name}' harus salah satu opsi.");
+        }
+    }
+
+    /// <summary>Min / Max (number, date, dateTime) and Step (number): written as they would be typed, and consistent.</summary>
+    private static void ValidateRange(ModuleFormField field, string name, List<string> errors)
+    {
+        var min = field.Min?.Trim() ?? "";
+        var max = field.Max?.Trim() ?? "";
+        if (!ModuleFieldValue.HasRange(field.Type))
+        {
+            if (min.Length > 0 || max.Length > 0) errors.Add($"Min dan Max field '{name}' hanya untuk tipe number, date, atau dateTime.");
+        }
+        else
+        {
+            if (min.Length > 0 && !ModuleFieldValue.IsValid(field.Type, min))
+                errors.Add($"Min field '{name}' tidak cocok dengan tipe {field.Type.ToString().ToLowerInvariant()}.");
+            if (max.Length > 0 && !ModuleFieldValue.IsValid(field.Type, max))
+                errors.Add($"Max field '{name}' tidak cocok dengan tipe {field.Type.ToString().ToLowerInvariant()}.");
+            if (min.Length > 0 && max.Length > 0 && ModuleFieldValue.Compare(field.Type, min, max) is > 0)
+                errors.Add($"Min field '{name}' tidak boleh lebih besar dari Max.");
+        }
+
+        var step = field.Step?.Trim() ?? "";
+        if (step.Length > 0)
+        {
+            if (field.Type != FormFieldType.Number)
+                errors.Add($"Step field '{name}' hanya untuk tipe number.");
+            else if (!decimal.TryParse(step, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var s) || s <= 0)
+                errors.Add($"Step field '{name}' harus angka lebih besar dari 0.");
         }
     }
 
     private static void ValidateLookup(ModuleFormField field, string name, List<string> errors)
     {
-        var lookup = field.Lookup;
+        var title = $"Field '{name}'";
+        var hasOptions = field.Options is { Count: > 0 };
+
+        if (field.Type != FormFieldType.Select && hasOptions)
+            errors.Add($"Opsi field '{name}' hanya untuk tipe select.");
+
         if (!ModuleFieldValue.IsLookup(field.Type))
         {
-            if (lookup is not null)
+            if (field.Lookup is not null)
                 errors.Add($"Lookup field '{name}' hanya untuk tipe select atau browse.");
             return;
         }
 
-        if (lookup is null || lookup.DataSourceId == Guid.Empty)
+        if (field.Type == FormFieldType.Select && hasOptions)
         {
-            errors.Add($"Field '{name}' ({field.Type.ToString().ToLowerInvariant()}) membutuhkan lookup dengan data source.");
+            if (field.Lookup is not null) errors.Add($"{title}: pilih salah satu, lookup atau opsi tetap.");
+            else CheckOptions(field.Options, title, errors);
             return;
         }
-        foreach (var (title, value) in new[] { ("ValueField", lookup.ValueField), ("TextField", lookup.TextField) })
-        {
-            var text = value?.Trim() ?? "";
-            if (text.Length == 0)
-                errors.Add($"Lookup field '{name}': {title} wajib diisi.");
-            else if (text.Length > MaxLookupFieldLength)
-                errors.Add($"Lookup field '{name}': {title} maksimal {MaxLookupFieldLength} karakter.");
-        }
+
+        CheckLookup(field.Lookup, title, errors);
     }
 
     private static bool IsCompilable(string pattern)

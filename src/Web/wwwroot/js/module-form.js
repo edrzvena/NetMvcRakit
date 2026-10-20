@@ -23,9 +23,16 @@
     config.form.fields = config.form.fields || [];
     const fields = config.form.fields; // edited in place: [{name, label, type, required, maxLength, regex, default, readonly}]
     const FIELD_TYPES = [['text', 'Text'], ['textarea', 'Textarea'], ['number', 'Number'], ['date', 'Date'], ['dateTime', 'DateTime'], ['boolean', 'Boolean'],
-        ['select', 'Select (dropdown lookup)'], ['browse', 'Browse (modal cari)']];
+        ['select', 'Select (dropdown)'], ['browse', 'Browse (modal cari)'], ['email', 'Email'], ['url', 'URL'], ['section', 'Seksi (judul pemisah)']];
     const isLookupType = (t) => t === 'select' || t === 'browse';
-    const isTextType = (t) => t === 'text' || t === 'textarea' || isLookupType(t); // MaxLength / Regex apply (a lookup value is stored as text)
+    const isTextType = (t) => t === 'text' || t === 'textarea' || t === 'email' || t === 'url' || isLookupType(t); // MaxLength / Regex apply (a lookup value is stored as text)
+    const hasRange = (t) => t === 'number' || t === 'date' || t === 'dateTime';
+    // fixed choices of a select (field or filter) as one "value|text" per line
+    const optionsToText = (opts) => (opts || []).map((o) => (o.text && o.text !== o.value ? o.value + '|' + o.text : o.value)).join('\n');
+    const textToOptions = (text) => text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((l) => {
+        const i = l.indexOf('|');
+        return i < 0 ? { value: l, text: l } : { value: l.slice(0, i).trim(), text: l.slice(i + 1).trim() };
+    });
 
     config.widget = config.widget || {};
     const widget = config.widget; // Widget module settings, read back from the inputs by collectWidget()
@@ -64,6 +71,31 @@
     $('take').value = config.display.take || 10;
     $('maxTake').value = config.display.maxTake || 100;
     $('keyField').value = config.display.keyField || '';
+
+    // title, search placeholder, buttons and the "more" menu (defaults = what a page always had: all buttons but Detail on, menu off)
+    const BUTTONS = { search: 'btn-search', filter: 'btn-filter', add: 'btn-add', edit: 'btn-edit', delete: 'btn-delete', detail: 'btn-detail' };
+    const MENU = { refresh: 'menu-refresh-opt', export: 'menu-export-opt', exportAll: 'menu-exportAll-opt', import: 'menu-import-opt' };
+    function loadDisplayProps(display) {
+        $('display-title').value = display.title || '';
+        $('display-placeholder').value = display.searchPlaceholder || '';
+        const buttons = display.buttons || {};
+        Object.entries(BUTTONS).forEach(([k, id]) => { $(id).checked = k === 'detail' ? buttons[k] === true : buttons[k] !== false; });
+        const menu = display.menu || {};
+        Object.entries(MENU).forEach(([k, id]) => { $(id).checked = menu[k] === true; });
+    }
+    loadDisplayProps(config.display);
+    function readDisplayProps() {
+        const buttons = {};
+        Object.entries(BUTTONS).forEach(([k, id]) => { buttons[k] = $(id).checked; });
+        const menu = {};
+        Object.entries(MENU).forEach(([k, id]) => { menu[k] = $(id).checked; });
+        return { title: $('display-title').value, searchPlaceholder: $('display-placeholder').value, buttons: buttons, menu: menu };
+    }
+
+    // filter panel: [{name, label, type, placeholder, lookup, options}], edited in place
+    config.display.filters = config.display.filters || [];
+    const filters = config.display.filters;
+    const FILTER_TYPES = [['text', 'Teks'], ['number', 'Angka'], ['date', 'Tanggal'], ['dateTime', 'Tanggal + waktu'], ['boolean', 'Ya / Tidak'], ['select', 'Pilihan (select)']];
 
     // ---- columns editor ----
     function refreshKeyColumns() {
@@ -196,6 +228,16 @@
             maxLength.value = f.maxLength || '';
             const regex = el('input', { class: 'form-control form-control-sm', value: f.regex || '', placeholder: 'regex (seluruh nilai)', maxlength: '500' });
             const def = el('input', { class: 'form-control form-control-sm', value: f.default || '', placeholder: 'default' });
+            const placeholder = el('input', { class: 'form-control form-control-sm', value: f.placeholder || '', placeholder: 'placeholder (hint di isian kosong)', maxlength: '200' });
+            const help = el('input', { class: 'form-control form-control-sm', value: f.help || '', placeholder: 'teks bantuan di bawah isian', maxlength: '300' });
+            const colSize = el('select', { class: 'form-select form-select-sm', 'aria-label': 'Ukuran kolom' });
+            colSize.appendChild(el('option', { value: '', text: 'Lebar penuh (12)' }));
+            for (let n = 1; n <= 11; n++) { const o = el('option', { value: String(n), text: n + ' dari 12 kolom' }); if (f.colSize === n) o.selected = true; colSize.appendChild(o); }
+            const min = el('input', { class: 'form-control form-control-sm', value: f.min || '', placeholder: 'min', maxlength: '40' });
+            const max = el('input', { class: 'form-control form-control-sm', value: f.max || '', placeholder: 'maks', maxlength: '40' });
+            const step = el('input', { class: 'form-control form-control-sm', value: f.step || '', placeholder: 'step (mis. 0.5)', maxlength: '40' });
+            const options = el('textarea', { class: 'form-control form-control-sm font-monospace', rows: '3', placeholder: 'opsi tetap, satu per baris: nilai|teks (kosong = pakai lookup)', spellcheck: 'false' });
+            options.value = optionsToText(f.options);
 
             // lookup (select / browse): where the choices come from
             const lookup = f.lookup = f.lookup || { dataSourceId: '', valueField: '', textField: '' };
@@ -244,9 +286,18 @@
             const syncType = () => {
                 const t = f.type || 'text';
                 const text = isTextType(t);
+                const section = t === 'section';
                 maxLength.disabled = !text;
                 regex.disabled = !text;
-                lkRow.classList.toggle('d-none', !isLookupType(t));
+                lkRow.classList.toggle('d-none', !isLookupType(t) || (t === 'select' && (f.options || []).length > 0));
+                min.disabled = !hasRange(t);
+                max.disabled = !hasRange(t);
+                step.disabled = t !== 'number';
+                options.classList.toggle('d-none', t !== 'select');
+                // a section is only a heading: nothing of the value-related settings applies
+                [required, readonly, def, maxLength, regex, placeholder].forEach((n) => { if (section) n.disabled = true; });
+                if (!section) { required.disabled = false; readonly.disabled = false; def.disabled = false; placeholder.disabled = false; }
+                label.placeholder = section ? 'judul seksi (wajib)' : 'label (kosong = nama)';
             };
             name.addEventListener('input', () => { f.name = name.value.trim(); });
             label.addEventListener('input', () => { f.label = label.value; });
@@ -256,6 +307,13 @@
             maxLength.addEventListener('input', () => { f.maxLength = parseInt(maxLength.value, 10) || null; });
             regex.addEventListener('input', () => { f.regex = regex.value; });
             def.addEventListener('input', () => { f.default = def.value; });
+            placeholder.addEventListener('input', () => { f.placeholder = placeholder.value; });
+            help.addEventListener('input', () => { f.help = help.value; });
+            colSize.addEventListener('change', () => { f.colSize = parseInt(colSize.value, 10) || null; });
+            min.addEventListener('input', () => { f.min = min.value; });
+            max.addEventListener('input', () => { f.max = max.value; });
+            step.addEventListener('input', () => { f.step = step.value; });
+            options.addEventListener('input', () => { f.options = textToOptions(options.value); syncType(); });
             syncType();
 
             const move = (d) => () => { const j = i + d; if (j < 0 || j >= fields.length) return; [fields[i], fields[j]] = [fields[j], fields[i]]; renderFields(); };
@@ -273,6 +331,13 @@
                 ]),
                 el('div', { class: 'row g-2 align-items-center' }, [
                     el('div', { class: 'col-md-2' }, [maxLength]), el('div', { class: 'col-md-6' }, [regex]), el('div', { class: 'col-md-4' }, [def]),
+                ]),
+                el('div', { class: 'row g-2 align-items-center mt-1' }, [
+                    el('div', { class: 'col-md-4' }, [placeholder]), el('div', { class: 'col-md-5' }, [help]), el('div', { class: 'col-md-3' }, [colSize]),
+                ]),
+                el('div', { class: 'row g-2 align-items-center mt-1' }, [
+                    el('div', { class: 'col-md-2' }, [min]), el('div', { class: 'col-md-2' }, [max]), el('div', { class: 'col-md-2' }, [step]),
+                    el('div', { class: 'col-md-6' }, [options]),
                 ]),
                 lkRow,
             ]);
@@ -620,6 +685,85 @@
         }
     });
 
+    // ---- filter editor ----
+    function renderFilters() {
+        const host = $('filters');
+        if (filters.length === 0) {
+            host.replaceChildren(el('div', { class: 'text-muted small mb-2', text: 'Belum ada filter.' }));
+            return;
+        }
+        host.replaceChildren(...filters.map((f, i) => {
+            const name = el('input', { class: 'form-control form-control-sm', value: f.name || '', placeholder: 'nama (mis. f_Nama)', maxlength: '64', 'aria-label': 'Nama filter ' + (i + 1), list: 'key-columns' });
+            const label = el('input', { class: 'form-control form-control-sm', value: f.label || '', placeholder: 'label', maxlength: '100', 'aria-label': 'Label filter ' + (i + 1) });
+            const type = el('select', { class: 'form-select form-select-sm', 'aria-label': 'Tipe filter ' + (i + 1) });
+            FILTER_TYPES.forEach(([v, t]) => { const o = el('option', { value: v, text: t }); if (v === (f.type || 'text')) o.selected = true; type.appendChild(o); });
+            const placeholder = el('input', { class: 'form-control form-control-sm', value: f.placeholder || '', placeholder: 'placeholder', maxlength: '200', 'aria-label': 'Placeholder filter ' + (i + 1) });
+
+            const options = el('textarea', { class: 'form-control form-control-sm font-monospace', rows: '3', placeholder: 'opsi tetap, satu per baris: nilai|teks (kosong = pakai lookup)', spellcheck: 'false' });
+            options.value = optionsToText(f.options);
+            const lookup = f.lookup = f.lookup || { dataSourceId: '', valueField: '', textField: '' };
+            const lkSource = el('select', { class: 'form-select form-select-sm', 'aria-label': 'Data source lookup filter' });
+            lkSource.appendChild(el('option', { value: '', text: '- data source lookup -' }));
+            [...$('DataSourceId').options].filter((o) => o.value).forEach((o) => {
+                const opt = el('option', { value: o.value, text: o.textContent.trim() });
+                if (o.value === lookup.dataSourceId) opt.selected = true;
+                lkSource.appendChild(opt);
+            });
+            const lkValue = el('input', { class: 'form-control form-control-sm', value: lookup.valueField || '', placeholder: 'kolom nilai', maxlength: '128' });
+            const lkText = el('input', { class: 'form-control form-control-sm', value: lookup.textField || '', placeholder: 'kolom teks', maxlength: '128' });
+            const choices = el('div', { class: 'row g-2 mt-1' }, [
+                el('div', { class: 'col-md-5' }, [options]),
+                el('div', { class: 'col-md-7' }, [el('div', { class: 'row g-2' }, [
+                    el('div', { class: 'col-12' }, [lkSource]), el('div', { class: 'col-6' }, [lkValue]), el('div', { class: 'col-6' }, [lkText]),
+                ])]),
+            ]);
+            const sync = () => choices.classList.toggle('d-none', (f.type || 'text') !== 'select');
+
+            name.addEventListener('input', () => { f.name = name.value.trim(); });
+            label.addEventListener('input', () => { f.label = label.value; });
+            type.addEventListener('change', () => { f.type = type.value; sync(); });
+            placeholder.addEventListener('input', () => { f.placeholder = placeholder.value; });
+            options.addEventListener('input', () => { f.options = textToOptions(options.value); });
+            lkSource.addEventListener('change', () => { lookup.dataSourceId = lkSource.value; });
+            lkValue.addEventListener('input', () => { lookup.valueField = lkValue.value.trim(); });
+            lkText.addEventListener('input', () => { lookup.textField = lkText.value.trim(); });
+            sync();
+
+            const move = (d) => () => { const j = i + d; if (j < 0 || j >= filters.length) return; [filters[i], filters[j]] = [filters[j], filters[i]]; renderFilters(); };
+            return el('div', { class: 'border rounded p-2 mb-2' }, [
+                el('div', { class: 'row g-2 align-items-center' }, [
+                    el('div', { class: 'col-md-3' }, [name]), el('div', { class: 'col-md-3' }, [label]), el('div', { class: 'col-md-2' }, [type]), el('div', { class: 'col-md-2' }, [placeholder]),
+                    el('div', { class: 'col-md-2 text-nowrap text-end' }, [
+                        iconButton('↑', 'Naik', move(-1), i === 0), iconButton('↓', 'Turun', move(1), i === filters.length - 1),
+                        iconButton('×', 'Hapus', () => { filters.splice(i, 1); renderFilters(); }),
+                    ]),
+                ]),
+                choices,
+            ]);
+        }));
+    }
+    $('add-filter').addEventListener('click', () => {
+        if (filters.length >= 10) { $('filters-status').textContent = 'Maksimal 10 filter.'; return; }
+        $('filters-status').textContent = '';
+        filters.push({ name: '', label: '', type: 'text' });
+        renderFilters();
+    });
+
+    function collectFilters() {
+        return filters.filter((f) => (f.name || '').trim()).map((f) => {
+            const type = f.type || 'text';
+            const out = { name: f.name.trim(), type: type };
+            if (f.label && f.label.trim()) out.label = f.label.trim();
+            if (f.placeholder && f.placeholder.trim()) out.placeholder = f.placeholder.trim();
+            if (type === 'select') {
+                const fixed = (f.options || []).filter((o) => o.value);
+                if (fixed.length > 0) out.options = fixed.map((o) => ({ value: o.value, text: o.text || o.value }));
+                else if (f.lookup && f.lookup.dataSourceId) out.lookup = { dataSourceId: f.lookup.dataSourceId, valueField: (f.lookup.valueField || '').trim(), textField: (f.lookup.textField || '').trim() };
+            }
+            return out;
+        });
+    }
+
     // ---- config (shared by Save and Preview) ----
     function collectConfig() {
         // A Widget has only its own settings (the server ignores Display and Form for it anyway).
@@ -631,21 +775,42 @@
         const keyField = $('keyField').value.trim();
         const formFields = fields.filter((f) => f.name).map((f) => {
             const type = f.type || 'text';
+            if (type === 'section') {
+                const heading = { name: f.name, type: type, required: false, readonly: false };
+                if (f.label && f.label.trim()) heading.label = f.label.trim();
+                if (f.help && f.help.trim()) heading.help = f.help.trim();
+                if (f.colSize) heading.colSize = f.colSize;
+                return heading;
+            }
             const out = { name: f.name, type: type, required: !!f.required, readonly: !!f.readonly };
             if (f.label && f.label.trim()) out.label = f.label.trim();
+            if (f.placeholder && f.placeholder.trim()) out.placeholder = f.placeholder.trim();
+            if (f.help && f.help.trim()) out.help = f.help.trim();
+            if (f.colSize) out.colSize = f.colSize;
+            if (hasRange(type)) {
+                if (f.min && f.min.trim()) out.min = f.min.trim();
+                if (f.max && f.max.trim()) out.max = f.max.trim();
+            }
+            if (type === 'number' && f.step && f.step.trim()) out.step = f.step.trim();
+            const fixed = (f.options || []).filter((o) => o.value);
             if (isTextType(type)) {
                 if (f.maxLength) out.maxLength = f.maxLength;
                 if (f.regex) out.regex = f.regex;
             }
             if (f.default) out.default = f.default;
+            if (type === 'select' && fixed.length > 0) {
+                out.options = fixed.map((o) => ({ value: o.value, text: o.text || o.value }));
+                return out; // fixed choices replace a lookup
+            }
             // A lookup without a data source is left out so the server reports "membutuhkan lookup" instead of failing to read the config.
             if (isLookupType(type) && f.lookup && f.lookup.dataSourceId) {
                 out.lookup = { dataSourceId: f.lookup.dataSourceId, valueField: (f.lookup.valueField || '').trim(), textField: (f.lookup.textField || '').trim() };
             }
             return out;
         });
+        const props = readDisplayProps();
         const display = {
-            take: take, maxTake: maxTake,
+            take: take, maxTake: maxTake, buttons: props.buttons, menu: props.menu, filters: collectFilters(),
             columns: columns.filter((c) => c.field).map((c) => {
                 const out = { field: c.field, visible: c.visible !== false, sortable: !!c.sortable, format: c.format || 'text' };
                 if (c.label && c.label.trim()) out.label = c.label.trim();
@@ -653,6 +818,8 @@
             }),
         };
         if (keyField) display.keyField = keyField;
+        if ($('display-title').value.trim()) display.title = $('display-title').value.trim();
+        if ($('display-placeholder').value.trim()) display.searchPlaceholder = $('display-placeholder').value.trim();
         return { display: display, form: { fields: formFields }, actions: collectActions(), access: config.access || { view: ['*'] } };
     }
     form.addEventListener('submit', () => { dirty = false; configInput.value = JSON.stringify(collectConfig()); });
@@ -712,6 +879,17 @@
             if (next.display.keyField !== undefined) $('keyField').value = next.display.keyField || '';
             if (Array.isArray(next.display.columns))
                 columns.splice(0, columns.length, ...next.display.columns.map((c) => Object.assign({ visible: true }, c)));
+            // buttons, menu, title and placeholder are loaded only when the config says something about them
+            if ('title' in next.display || 'searchPlaceholder' in next.display || next.display.buttons || next.display.menu) {
+                const current = readDisplayProps();
+                loadDisplayProps({
+                    title: 'title' in next.display ? next.display.title : current.title,
+                    searchPlaceholder: 'searchPlaceholder' in next.display ? next.display.searchPlaceholder : current.searchPlaceholder,
+                    buttons: Object.assign({}, current.buttons, next.display.buttons || {}),
+                    menu: Object.assign({}, current.menu, next.display.menu || {}),
+                });
+            }
+            if (Array.isArray(next.display.filters)) filters.splice(0, filters.length, ...next.display.filters);
         }
         if (next.form && Array.isArray(next.form.fields)) fields.splice(0, fields.length, ...next.form.fields);
         if (Array.isArray(next.actions)) actionList.splice(0, actionList.length, ...next.actions);
@@ -725,6 +903,7 @@
 
         renderColumns();
         renderFields();
+        renderFilters();
         renderActions();
         renderChartSeries();
         refreshWidgetWarnings();
@@ -843,6 +1022,7 @@
 
     renderColumns();
     renderFields();
+    renderFilters();
     renderChartSeries();
     applyType();
 })();

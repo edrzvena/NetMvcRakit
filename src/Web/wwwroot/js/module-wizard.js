@@ -85,7 +85,11 @@
 
     // ---- step 2: columns ----
     function selectedColumns() {
-        return Array.from($('wizard-columns').querySelectorAll('tbody input[type="checkbox"]:checked')).map((c) => c.dataset.column);
+        return Array.from($('wizard-columns').querySelectorAll('tbody input[data-column]:checked')).map((c) => c.dataset.column);
+    }
+
+    function selectedFilters() {
+        return Array.from($('wizard-columns').querySelectorAll('tbody input[data-filter-column]:checked')).map((c) => c.dataset.filterColumn);
     }
 
     function badge(text, cls) { return el('span', { class: 'badge ' + cls + ' me-1', text: text }); }
@@ -97,6 +101,8 @@
             const box = el('input', { type: 'checkbox', class: 'form-check-input', 'data-column': c.name, 'aria-label': 'Sertakan ' + c.name });
             box.checked = c.selectable;
             box.disabled = !c.selectable || !!isKey;
+            const filterBox = el('input', { type: 'checkbox', class: 'form-check-input', 'data-filter-column': c.name, 'aria-label': 'Jadikan ' + c.name + ' sebagai filter' });
+            filterBox.disabled = !c.filterable;
             const marks = [];
             if (c.isPrimaryKey) marks.push(badge('PK', 'text-bg-primary'));
             if (c.isIdentity) marks.push(badge('identity', 'text-bg-secondary'));
@@ -104,7 +110,7 @@
             if (c.hasDefault) marks.push(badge('default', 'text-bg-light border'));
             return el('tr', { class: c.selectable ? '' : 'text-muted' }, [
                 el('td', {}, [box]), el('td', {}, [el('code', { text: c.name })]), el('td', { text: c.type }),
-                el('td', {}, marks), el('td', { class: 'small', text: c.note || '' }),
+                el('td', {}, marks), el('td', { class: 'text-center' }, [filterBox]), el('td', { class: 'small', text: c.note || '' }),
             ]);
         });
         $('wizard-columns').querySelector('tbody').replaceChildren(...rows);
@@ -123,13 +129,17 @@
     }
     $('wizard-key').addEventListener('change', () => {
         const keep = new Set(selectedColumns().map((c) => c.toLowerCase()));
+        const keepFilters = new Set(selectedFilters().map((c) => c.toLowerCase()));
         renderColumns();
-        $('wizard-columns').querySelectorAll('tbody input[type="checkbox"]').forEach((box) => {
+        $('wizard-columns').querySelectorAll('tbody input[data-column]').forEach((box) => {
             if (!box.disabled) box.checked = keep.has(box.dataset.column.toLowerCase());
         });
+        $('wizard-columns').querySelectorAll('tbody input[data-filter-column]').forEach((box) => {
+            if (!box.disabled) box.checked = keepFilters.has(box.dataset.filterColumn.toLowerCase());
+        });
     });
-    $('wizard-all').addEventListener('click', () => $('wizard-columns').querySelectorAll('tbody input[type="checkbox"]:not(:disabled)').forEach((b) => { b.checked = true; }));
-    $('wizard-none').addEventListener('click', () => $('wizard-columns').querySelectorAll('tbody input[type="checkbox"]:not(:disabled)').forEach((b) => { b.checked = false; }));
+    $('wizard-all').addEventListener('click', () => $('wizard-columns').querySelectorAll('tbody input[data-column]:not(:disabled)').forEach((b) => { b.checked = true; }));
+    $('wizard-none').addEventListener('click', () => $('wizard-columns').querySelectorAll('tbody input[data-column]:not(:disabled)').forEach((b) => { b.checked = false; }));
 
     // ---- step 3: actions ----
     function renderStep3() {
@@ -191,6 +201,7 @@
                 name: inspection.name,
                 columns: selectedColumns(),
                 keyColumn: $('wizard-key').value || null,
+                filterColumns: forForm() ? [] : selectedFilters(),
                 insert: $('wizard-insert').checked && !$('wizard-insert').disabled,
                 update: $('wizard-update').checked && !$('wizard-update').disabled,
                 delete: $('wizard-delete').checked && !$('wizard-delete').disabled,
@@ -211,7 +222,14 @@
         // Only what the wizard knows is loaded: Display (columns, key) for a table, Form fields when there are write actions.
         const partial = {};
         const config = result.config || {};
-        if (!forForm() && config.display) partial.display = { keyField: config.display.keyField || '', columns: config.display.columns || [] };
+        if (!forForm() && config.display) {
+            partial.display = { keyField: config.display.keyField || '', columns: config.display.columns || [] };
+            // what the wizard knows about the page: filters it made (only when it made some, so manual ones are not wiped), the
+            // Lihat button when it made a Detail data source, and a Muat ulang item; the other buttons and menu items stay as they are
+            if ((config.display.filters || []).length > 0) partial.display.filters = config.display.filters;
+            partial.display.buttons = { detail: !!(config.display.buttons && config.display.buttons.detail) };
+            partial.display.menu = { refresh: true };
+        }
         if (config.form && config.form.fields && config.form.fields.length > 0) partial.form = { fields: config.form.fields };
         RM.applyConfig(partial);
 

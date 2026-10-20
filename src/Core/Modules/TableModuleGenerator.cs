@@ -84,9 +84,11 @@ public sealed class TableModuleGenerator(
         else if (!TableModuleMapping.IsWritableType(baseType)) note = "tipe lama: hanya untuk dibaca";
         else if (!TableModuleMapping.IsPlainName(c.Name)) note = "nama kolom tidak didukung untuk aksi tulis";
 
+        var filterable = listable && TableModuleMapping.IsFilterable(baseType) && TableModuleMapping.FilterName(c.Name) is not null;
+
         return new TableColumnChoice(
             c.Name, c.Type, c.IsNullable, c.IsIdentity, c.IsPrimaryKey, c.DefaultDefinition is not null,
-            listable, writable, note,
+            listable, writable, filterable, note,
             CamelCase(TableModuleMapping.Format(baseType)), CamelCase(TableModuleMapping.FieldType(c.Type)));
     }
 
@@ -200,6 +202,19 @@ public sealed class TableModuleGenerator(
 
         // ---- data sources ----
         var columnNames = selected.Select(c => c.Name).ToList();
+
+        // generated filters: a TableFilter per column on the List data source, fed from the query string as f_<column>
+        var filterColumns = new List<PlaygroundColumn>();
+        foreach (var name in request.FilterColumns.Select(c => c?.Trim() ?? "").Where(c => c.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var column = selected.FirstOrDefault(c => c.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                ?? throw Invalid($"Kolom filter '{name}' harus ikut dipilih untuk list.");
+            if (!Choice(column).Filterable) throw Invalid($"Kolom '{column.Name}' tidak bisa dijadikan filter (tipe {column.Type} atau nama kolomnya).");
+            filterColumns.Add(column);
+        }
+        if (filterColumns.Count > ModuleFilter.MaxPerModule)
+            throw Invalid($"Maksimal {ModuleFilter.MaxPerModule} filter.");
+
         if (!request.ForForm)
         {
             var sortColumn = key?.Name ?? selected.FirstOrDefault(c => TableModuleMapping.BaseType(c.Type) is not ("text" or "ntext"))?.Name;
@@ -213,7 +228,18 @@ public sealed class TableModuleGenerator(
                     {
                         Schema = schema, Name = tableName, Columns = columnNames,
                         Sort = sortColumn is null ? [] : [new TableSort { Column = sortColumn }],
+                        Filters = filterColumns.Select(c => new TableFilter
+                        {
+                            Column = c.Name,
+                            Operator = TableModuleMapping.Format(TableModuleMapping.BaseType(c.Type)) == ColumnFormat.Text
+                                       && TableModuleMapping.BaseType(c.Type) != "uniqueidentifier" ? "like" : "=",
+                            Parameter = TableModuleMapping.FilterName(c.Name)!,
+                        }).ToList(),
                     },
+                    Parameters = filterColumns.Select(c => new ParameterMapping
+                    {
+                        Name = TableModuleMapping.FilterName(c.Name)!, Source = ParameterSource.QueryString, Key = TableModuleMapping.FilterName(c.Name),
+                    }).ToList(),
                 },
             }, user, ct));
 
@@ -256,6 +282,20 @@ public sealed class TableModuleGenerator(
         if (!request.ForForm)
         {
             config.Display.KeyField = key?.Name;
+            config.Display.Menu.Refresh = true;
+            config.Display.Buttons.Detail = key is not null;
+            config.Display.Filters = filterColumns.Select(c => new ModuleFilter
+            {
+                Name = TableModuleMapping.FilterName(c.Name)!,
+                Label = TableModuleMapping.Label(c.Name),
+                Type = TableModuleMapping.Format(TableModuleMapping.BaseType(c.Type)) switch
+                {
+                    ColumnFormat.Number => FormFieldType.Number,
+                    ColumnFormat.Date => FormFieldType.Date,
+                    ColumnFormat.Boolean => FormFieldType.Boolean,
+                    _ => FormFieldType.Text,
+                },
+            }).ToList();
             config.Display.Columns = selected.Select(c => new ModuleColumn
             {
                 Field = c.Name,

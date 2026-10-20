@@ -6,10 +6,21 @@
     // The record UI (token, modals) is only emitted for a module that has record actions. Which buttons are really
     // offered is decided per request by /data (it also depends on Rakit:Db:AllowWrite).
     var source = Model.Config.Source;
+    var display = Model.Config.Display;
+    var buttons = display.Buttons;
+    var menu = display.Menu;
+    var filters = display.Filters;
     var fields = Model.Config.Form.Fields;
-    var hasSave = (source.Insert is not null || source.Update is not null) && fields.Count > 0;
+    var hasDataFields = fields.Any(f => !f.IsSection);
+    var hasSave = (source.Insert is not null || source.Update is not null) && hasDataFields;
     var hasDelete = source.Delete is not null;
     var hasBrowse = hasSave && fields.Any(f => f.Type == FormFieldType.Browse);
+    var hasView = buttons.Detail && source.Detail is not null && !string.IsNullOrWhiteSpace(display.KeyField);
+    var hasImport = menu.Import && source.Insert is not null && hasDataFields;
+    var hasMenu = menu.Refresh || menu.Export || menu.ExportAll || hasImport;
+    var showFilter = buttons.Filter && filters.Count > 0;
+    var title = string.IsNullOrWhiteSpace(display.Title) ? Model.Name : display.Title.Trim();
+    var placeholder = string.IsNullOrWhiteSpace(display.SearchPlaceholder) ? "Cari..." : display.SearchPlaceholder.Trim();
 
     // Workflow buttons: page-level ones sit in the toolbar, per-row ones are drawn by the script from data-row-actions.
     string StyleOf(ModuleAction a) => ModuleAction.Styles.Contains(a.Style ?? "", StringComparer.OrdinalIgnoreCase) ? a.Style!.ToLowerInvariant() : "primary";
@@ -17,9 +28,10 @@
     var rowActions = Model.Config.Actions.Where(a => a.PerRow)
         .Select(a => new { code = a.Code.Trim(), label = a.Label.Trim(), style = StyleOf(a), confirm = a.Confirm }).ToList();
     var hasActions = Model.Config.Actions.Count > 0;
+    var filterInfo = filters.Select(f => new { name = f.Name.Trim(), type = f.Type.ToString().ToLowerInvariant(), lookup = f.Type == FormFieldType.Select && f.Lookup is not null }).ToList();
 }
 
-<h1 class="h3 mb-1">@Model.Name</h1>
+<h1 class="h3 mb-1">@title</h1>
 @if (!string.IsNullOrWhiteSpace(Model.Description))
 {
     <p class="text-muted">@Model.Description</p>
@@ -28,36 +40,119 @@
 <div id="object-page" data-url="@Url.Action("Data", "Page", new { area = "Object", moduleId = Model.Id })"
      data-record-url="@Url.Action("RecordInsert", "Page", new { area = "Object", moduleId = Model.Id })"
      data-lookup-url="@Url.Action("Lookup", "Page", new { area = "Object", moduleId = Model.Id, field = "__FIELD__" })"
+     data-filter-lookup-url="@Url.Action("FilterLookup", "Page", new { area = "Object", moduleId = Model.Id, name = "__NAME__" })"
+     data-view-url="@Url.Action("RecordView", "Page", new { area = "Object", moduleId = Model.Id, key = "__KEY__" })"
+     data-export-url="@Url.Action("Export", "Page", new { area = "Object", moduleId = Model.Id })"
+     data-import-url="@Url.Action("Import", "Page", new { area = "Object", moduleId = Model.Id })"
      data-action-url="@Url.Action("RunAction", "Page", new { area = "Object", moduleId = Model.Id, code = "__CODE__" })"
      data-row-actions="@System.Text.Json.JsonSerializer.Serialize(rowActions)"
-     data-take="@Model.Config.Display.Take" data-max-take="@Model.Config.Display.MaxTake">
-    @if (hasSave || hasDelete || hasActions)
+     data-filters="@System.Text.Json.JsonSerializer.Serialize(filterInfo)"
+     data-take="@display.Take" data-max-take="@display.MaxTake">
+    @if (hasSave || hasDelete || hasActions || hasImport)
     {
         @Html.AntiForgeryToken()
     }
     <form id="search-form" class="row g-2 mb-3" role="search">
-        <div class="col-sm-6 col-md-4">
+        <div class="col-sm-6 col-md-4 @(buttons.Search ? "" : "d-none")">
             <label class="visually-hidden" for="search-input">Cari</label>
-            <input type="search" class="form-control form-control-sm" id="search-input" placeholder="Cari..." maxlength="255" autocomplete="off" />
+            <input type="search" class="form-control form-control-sm" id="search-input" placeholder="@placeholder" maxlength="255" autocomplete="off" />
         </div>
-        <div class="col-auto">
+        <div class="col-auto @(buttons.Search ? "" : "d-none")">
             <button type="submit" class="btn btn-sm btn-primary">Cari</button>
             <button type="button" class="btn btn-sm btn-outline-secondary" id="search-clear">Reset</button>
         </div>
-        @if (hasSave || pageActions.Count > 0)
-        {
-            <div class="col-auto ms-auto d-flex gap-1">
-                @foreach (var a in pageActions)
-                {
-                    <button type="button" class="btn btn-sm btn-@StyleOf(a)" data-action="@a.Code.Trim()" data-confirm="@a.Confirm">@a.Label.Trim()</button>
-                }
-                @if (hasSave)
-                {
-                    <button type="button" class="btn btn-sm btn-success d-none" id="record-add">+ Tambah</button>
-                }
-            </div>
-        }
+        <div class="col-auto ms-auto d-flex gap-1">
+            @if (showFilter)
+            {
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="filter-toggle" aria-expanded="false" aria-controls="filter-panel">
+                    <i class="bi bi-funnel"></i> Filter <span class="badge text-bg-primary d-none" id="filter-count">0</span>
+                </button>
+            }
+            @foreach (var a in pageActions)
+            {
+                <button type="button" class="btn btn-sm btn-@StyleOf(a)" data-action="@a.Code.Trim()" data-confirm="@a.Confirm">@a.Label.Trim()</button>
+            }
+            @if (hasSave && buttons.Add)
+            {
+                <button type="button" class="btn btn-sm btn-success d-none" id="record-add">+ Tambah</button>
+            }
+            @if (hasMenu)
+            {
+                <div class="dropdown">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Menu lainnya"><i class="bi bi-three-dots-vertical"></i></button>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        @if (menu.Refresh)
+                        {
+                            <li><button type="button" class="dropdown-item" id="menu-refresh"><i class="bi bi-arrow-clockwise"></i> Muat ulang</button></li>
+                        }
+                        @if (menu.Export)
+                        {
+                            <li><button type="button" class="dropdown-item" id="menu-export"><i class="bi bi-download"></i> Export halaman ini (CSV)</button></li>
+                        }
+                        @if (menu.ExportAll)
+                        {
+                            <li><button type="button" class="dropdown-item" id="menu-export-all"><i class="bi bi-download"></i> Export semua data (CSV)</button></li>
+                        }
+                        @if (hasImport)
+                        {
+                            <li><button type="button" class="dropdown-item d-none" id="menu-import"><i class="bi bi-upload"></i> Import dari CSV...</button></li>
+                        }
+                    </ul>
+                </div>
+            }
+        </div>
     </form>
+
+    @if (showFilter)
+    {
+        <div class="card card-body mb-3 d-none" id="filter-panel">
+            <form id="filter-form" class="row g-2 align-items-end">
+                @foreach (var f in filters)
+                {
+                    var fname = f.Name.Trim();
+                    var fid = "flt-" + fname;
+                    var flabel = string.IsNullOrWhiteSpace(f.Label) ? fname : f.Label.Trim();
+                    <div class="col-sm-6 col-md-4 col-lg-3">
+                        <label class="form-label small mb-1" for="@fid">@flabel</label>
+                        @if (f.Type == FormFieldType.Boolean)
+                        {
+                            <select class="form-select form-select-sm" id="@fid" data-filter="@fname">
+                                <option value="">Semua</option>
+                                <option value="true">Ya</option>
+                                <option value="false">Tidak</option>
+                            </select>
+                        }
+                        else if (f.Type == FormFieldType.Select)
+                        {
+                            <select class="form-select form-select-sm" id="@fid" data-filter="@fname" data-filter-lookup="@(f.Lookup is not null ? "1" : null)">
+                                <option value="">Semua</option>
+                                @foreach (var option in f.Options ?? [])
+                                {
+                                    <option value="@option.Value.Trim()">@(string.IsNullOrWhiteSpace(option.Text) ? option.Value.Trim() : option.Text.Trim())</option>
+                                }
+                            </select>
+                        }
+                        else
+                        {
+                            var ftype = f.Type switch
+                            {
+                                FormFieldType.Number => "number",
+                                FormFieldType.Date => "date",
+                                FormFieldType.DateTime => "datetime-local",
+                                _ => "text",
+                            };
+                            <input class="form-control form-control-sm" type="@ftype" id="@fid" data-filter="@fname"
+                                   step="@(f.Type == FormFieldType.Number ? "any" : null)" placeholder="@f.Placeholder" autocomplete="off" />
+                        }
+                    </div>
+                }
+                <div class="col-auto">
+                    <button type="submit" class="btn btn-sm btn-primary">Terapkan</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="filter-clear">Reset filter</button>
+                </div>
+            </form>
+        </div>
+    }
 
     <div id="page-message" class="alert d-none" role="status"></div>
 
@@ -79,7 +174,7 @@
 @if (hasSave)
 {
     <div class="modal fade" id="record-modal" tabindex="-1" aria-labelledby="record-title" aria-hidden="true">
-        <div class="modal-dialog">
+        <div class="modal-dialog @(fields.Any(f => f.ColSize is >= 1 and <= 11) ? "modal-lg" : "")">
             <form class="modal-content" id="record-form" novalidate>
                 <div class="modal-header">
                     <h2 class="modal-title h5" id="record-title">Data</h2>
@@ -101,6 +196,55 @@
 @if (hasBrowse)
 {
     <partial name="_LookupModal" />
+}
+
+@if (hasView)
+{
+    <div class="modal fade" id="view-modal" tabindex="-1" aria-labelledby="view-title" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5" id="view-title">Detail</h2>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Tutup"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="view-alert" class="alert alert-danger d-none" role="alert"></div>
+                    <div id="view-body"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Tutup</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (hasImport)
+{
+    <div class="modal fade" id="import-modal" tabindex="-1" aria-labelledby="import-title" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <form class="modal-content" id="import-form" novalidate>
+                <div class="modal-header">
+                    <h2 class="modal-title h5" id="import-title">Import dari CSV</h2>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Tutup"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small text-muted">
+                        Baris pertama berisi nama kolom (sama dengan nama atau label field), pemisah koma atau titik koma. Maksimal @ModuleExport.MaxImportRows baris dan 1 MB.
+                        Tiap baris disimpan sendiri-sendiri: baris yang gagal dilaporkan, yang lain tetap tersimpan.
+                        <a href="@Url.Action("ImportTemplate", "Page", new { area = "Object", moduleId = Model.Id })">Unduh template CSV</a>
+                    </p>
+                    <div id="import-alert" class="alert alert-danger d-none" role="alert"></div>
+                    <input class="form-control" type="file" id="import-file" accept=".csv,text/csv" aria-label="File CSV" />
+                    <div id="import-result" class="mt-3"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Tutup</button>
+                    <button type="submit" class="btn btn-primary" id="import-run">Impor</button>
+                </div>
+            </form>
+        </div>
+    </div>
 }
 
 @if (hasDelete)

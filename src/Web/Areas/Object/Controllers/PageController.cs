@@ -23,7 +23,8 @@ namespace Rakit.Web.Areas.Object.Controllers;
 [Route("object/page")]
 public class PageController(
     IModuleRuntimeService runtime, IModuleRecordService records, IModuleLookupService lookups, IModuleVisualService visual,
-    IModuleActionService actions, IOptions<RakitDbOptions> dbOptions, ILogger<PageController> logger)
+    IModuleActionService actions, IModuleExportService exports, IModuleImportService imports,
+    IOptions<RakitDbOptions> dbOptions, ILogger<PageController> logger)
     : Controller
 {
     private const int MaxWriteBodyBytes = 262_144;
@@ -141,6 +142,68 @@ public class PageController(
             result.Items.Select(i => new ObjectLookupItem(i.Value, i.Text)).ToList(), result.Total, result.Skip, result.Take, result.HasNext));
     });
 
+    /// <summary>Choices of a select filter that reads them from a lookup data source (same shape as a field's lookup).</summary>
+    [HttpGet("{moduleId:guid}/filter/{name}/lookup")]
+    public Task<IActionResult> FilterLookup(Guid moduleId, string name, CancellationToken ct) => RecordAsync(async () =>
+    {
+        var query = Request.Query;
+        var result = await lookups.SearchFilterAsync(
+            moduleId, name, await HttpParameterContext.FromAsync(HttpContext, ct),
+            new ModuleLookupRequest(ToInt(query["_skip"]), ToInt(query["_take"]), query["_q"].FirstOrDefault()), ct);
+        return Json(new ObjectLookup(
+            result.Items.Select(i => new ObjectLookupItem(i.Value, i.Text)).ToList(), result.Total, result.Skip, result.Take, result.HasNext));
+    });
+
+    /// <summary>The read-only "Lihat" modal: the record as label / text lines (needs display.buttons.detail).</summary>
+    [HttpGet("{moduleId:guid}/record/{key}/view")]
+    public Task<IActionResult> RecordView(Guid moduleId, string key, CancellationToken ct) => RecordAsync(async () =>
+    {
+        var items = await records.ViewAsync(moduleId, key, await HttpParameterContext.FromAsync(HttpContext, ct), ct);
+        return Json(new ObjectRecordView(items.Select(i => new ObjectViewItem(i.Label, i.Text, i.IsSection)).ToList()));
+    });
+
+    // ---- export and import (CSV) -----------------------------------------------------------------
+
+    /// <summary>
+    /// A CSV of the list. The query string is the page's own (search, sort, paging, filters); <c>_all=1</c> exports every matching
+    /// row (up to 10,000, header <c>X-Rakit-Export-Truncated: 1</c> when cut), otherwise only the page being shown.
+    /// </summary>
+    [HttpGet("{moduleId:guid}/export")]
+    public Task<IActionResult> Export(Guid moduleId, CancellationToken ct) => RecordAsync(async () =>
+    {
+        var query = Request.Query;
+        var result = await exports.ExportAsync(
+            moduleId, await HttpParameterContext.FromAsync(HttpContext, ct),
+            new ModuleListRequest(ToInt(query["_skip"]), ToInt(query["_take"]), query["_order"].FirstOrDefault(), query["_q"].FirstOrDefault()),
+            all: query["_all"].FirstOrDefault() == "1", ct);
+        Response.Headers["X-Rakit-Export-Rows"] = result.Rows.ToString(CultureInfo.InvariantCulture);
+        if (result.Truncated) Response.Headers["X-Rakit-Export-Truncated"] = "1";
+        Response.Headers.AccessControlExposeHeaders = "X-Rakit-Export-Rows, X-Rakit-Export-Truncated, Content-Disposition";
+        return File(result.Content, "text/csv; charset=utf-8", result.FileName);
+    });
+
+    [HttpGet("{moduleId:guid}/import-template")]
+    public Task<IActionResult> ImportTemplate(Guid moduleId, CancellationToken ct) => RecordAsync(async () =>
+        File(ModuleImportService.WithBom(await imports.TemplateAsync(moduleId, ct)), "text/csv; charset=utf-8", "template-import.csv"));
+
+    /// <summary>A CSV file (field "file", at most 1 MB): one Insert per row through the form's own validation; see <see cref="ObjectImportResult"/>.</summary>
+    [HttpPost("{moduleId:guid}/import"), ValidateAntiForgeryToken, RequestSizeLimit(ModuleExport.MaxImportBytes + 65_536)]
+    public Task<IActionResult> Import(Guid moduleId, CancellationToken ct) => RecordAsync(async () =>
+    {
+        var form = await Request.ReadFormAsync(ct);
+        var file = form.Files.FirstOrDefault();
+        if (file is null || file.Length == 0) throw new ModuleImportException("Pilih file CSV dulu.");
+        if (file.Length > ModuleExport.MaxImportBytes) throw new ModuleImportException("File terlalu besar (maksimal 1 MB).");
+
+        string text;
+        using (var reader = new StreamReader(file.OpenReadStream(), System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
+            text = await reader.ReadToEndAsync(ct);
+
+        var result = await imports.ImportAsync(moduleId, text, await HttpParameterContext.FromAsync(HttpContext, ct), ct);
+        return Json(new ObjectImportResult(
+            result.Total, result.Imported, result.Failures.Select(f => new ObjectImportFailure(f.Row, f.Message)).ToList(), result.Notes));
+    });
+
     [HttpGet("{moduleId:guid}/record/{key}")]
     public Task<IActionResult> RecordDetail(Guid moduleId, string key, CancellationToken ct) => RecordAsync(async () =>
     {
@@ -240,6 +303,18 @@ public class PageController(
         {
             return Error(StatusCodes.Status422UnprocessableEntity, ex.Message);
         }
+        catch (ModuleImportException ex)
+        {
+            return Error(StatusCodes.Status400BadRequest, ex.Message);
+        }
+        catch (ModuleListRequestException ex)
+        {
+            return Error(StatusCodes.Status400BadRequest, ex.Message);
+        }
+        catch (ModuleListUnavailableException ex)
+        {
+            return Error(StatusCodes.Status503ServiceUnavailable, ex.Message);
+        }
         catch (SqlExecutionException ex)
         {
             return SqlError(ex);
@@ -260,7 +335,7 @@ public class PageController(
             : ex.Kind == SqlExecErrorKind.Business ? StatusCodes.Status422UnprocessableEntity
             : StatusCodes.Status500InternalServerError, ex.Message);
 
-    private static ObjectActions ToActions(ModuleRecordActions actions) => new(actions.CanAdd, actions.CanEdit, actions.CanDelete);
+    private static ObjectActions ToActions(ModuleRecordActions actions) => new(actions.CanAdd, actions.CanEdit, actions.CanDelete, actions.CanView, actions.CanImport);
 
     private JsonResult Error(int status, string message)
     {

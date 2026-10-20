@@ -22,7 +22,8 @@ public sealed class ModuleListRequestException(string message, Exception? inner 
 /// <param name="Take">Page size. Null = the module's default; always clamped to 1..MaxTake.</param>
 /// <param name="OrderBy"><c>field_asc</c> / <c>field_desc</c>; honoured only for a configured, sortable column.</param>
 /// <param name="Search">Free text, trimmed and cut to 255 characters.</param>
-public sealed record ModuleListRequest(int? Skip = null, int? Take = null, string? OrderBy = null, string? Search = null);
+/// <param name="Export">The export reads the list in chunks of up to <see cref="ModuleDisplay.HardMaxTake"/> rows, beyond the page size a visitor may ask for.</param>
+public sealed record ModuleListRequest(int? Skip = null, int? Take = null, string? OrderBy = null, string? Search = null, bool Export = false);
 
 public sealed record ModuleListColumn(string Field, string Label, bool Sortable, ColumnFormat Format);
 
@@ -132,11 +133,24 @@ public sealed class ModuleRuntimeService(
         if (dataSourceId is null || dataSourceId == Guid.Empty)
             throw Unavailable(module, "the module has no list data source", null);
 
-        var take = Math.Clamp(request.Take ?? display.Take, 1, Math.Clamp(display.MaxTake, 1, ModuleDisplay.HardMaxTake));
+        var largestPage = request.Export ? ModuleDisplay.HardMaxTake : Math.Clamp(display.MaxTake, 1, ModuleDisplay.HardMaxTake);
+        var take = Math.Clamp(request.Take ?? display.Take, 1, largestPage);
         var skip = Math.Max(request.Skip ?? 0, 0);
         var search = request.Search?.Trim();
         if (search is { Length: > MaxSearchLength }) search = search[..MaxSearchLength];
         var orderBy = ResolveOrder(request.OrderBy, display.Columns);
+
+        // A filter value comes from a URL: one that does not fit the filter's type is the visitor's mistake, not a database error.
+        foreach (var filter in display.Filters)
+        {
+            if (filter.Type is FormFieldType.Number or FormFieldType.Date or FormFieldType.DateTime or FormFieldType.Boolean
+                && context.QueryString.TryGetValue(filter.Name.Trim(), out var value) && !string.IsNullOrWhiteSpace(value)
+                && !ModuleFieldValue.IsValid(filter.Type, value.Trim()))
+            {
+                var label = string.IsNullOrWhiteSpace(filter.Label) ? filter.Name.Trim() : filter.Label.Trim();
+                throw new ModuleListRequestException($"Nilai filter \"{label}\" tidak valid.");
+            }
+        }
 
         DataSourceResult result;
         try

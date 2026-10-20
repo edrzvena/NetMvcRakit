@@ -21,7 +21,19 @@ public sealed record ObjectPageData(
     IReadOnlyList<string?>? Keys,
     ObjectActions Actions);
 
-public sealed record ObjectActions(bool CanAdd, bool CanEdit, bool CanDelete);
+/// <param name="CanView">The read-only "Lihat" button per row.</param>
+/// <param name="CanImport">The Import menu item.</param>
+public sealed record ObjectActions(bool CanAdd, bool CanEdit, bool CanDelete, bool CanView = false, bool CanImport = false);
+
+/// <summary>One line of the read-only record view; a section is a heading with an optional description in Text.</summary>
+public sealed record ObjectViewItem(string Label, string? Text, bool IsSection);
+
+public sealed record ObjectRecordView(IReadOnlyList<ObjectViewItem> Items);
+
+public sealed record ObjectImportFailure(int Row, string Message);
+
+/// <summary>What an import did. Failures are the first ones only (see Total and Imported for the real numbers).</summary>
+public sealed record ObjectImportResult(int Total, int Imported, IReadOnlyList<ObjectImportFailure> Failures, IReadOnlyList<string> Notes);
 
 /// <summary>Field values of one record, keyed by form field name, written the way an input shows them.</summary>
 public sealed record ObjectRecord(IReadOnlyDictionary<string, string?> Values);

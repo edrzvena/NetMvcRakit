@@ -58,6 +58,8 @@ public static class DependencyInjection
         services.AddSingleton<IModuleRecordService, ModuleRecordService>();
         services.AddSingleton<IModuleLookupService, ModuleLookupService>();
         services.AddSingleton<ITableModuleGenerator, TableModuleGenerator>();
+        services.AddSingleton<IModuleExportService, ModuleExportService>();
+        services.AddSingleton<IModuleImportService, ModuleImportService>();
         services.AddSingleton<IModuleVisualService, ModuleVisualService>();
         services.Configure<WorkflowOptions>(configuration.GetSection(WorkflowOptions.SectionName));
         services.Configure<MailOptions>(configuration.GetSection(MailOptions.SectionName));

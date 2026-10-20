@@ -4,6 +4,8 @@
 // When the module has record actions (Table CRUD), /data also says which buttons to show and gives each row's key; add / edit
 // happen in a Bootstrap modal, delete behind a confirmation modal, and every write goes out as FormData with the anti-forgery
 // header. The server's per-field messages (400 `errors`) are drawn under the matching inputs.
+// Filters (the panel above the grid) live in the URL too, under the filter's own name; the "more" menu refreshes, exports the page or
+// every matching row as CSV and imports a CSV; a row's "Lihat" opens the read-only view of the record.
 (function () {
     'use strict';
 
@@ -15,6 +17,9 @@
     const defaultTake = parseInt(root.dataset.take, 10) || 10;
     const maxTake = parseInt(root.dataset.maxTake, 10) || 100;
     const CONTROL = ['_skip', '_take', '_order', '_q'];
+    let filterInfo = []; // the filter panel's inputs: [{name, type, lookup}]
+    try { filterInfo = JSON.parse(root.dataset.filters || '[]') || []; } catch (e) { filterInfo = []; }
+    const filterNames = filterInfo.map((f) => f.name.toLowerCase());
     let rowActions = []; // workflow buttons drawn on every row: [{code, label, style, confirm}]
     try { rowActions = JSON.parse(root.dataset.rowActions || '[]') || []; } catch (e) { rowActions = []; }
 
@@ -76,7 +81,9 @@
         state.order = data.orderBy || '';
 
         const actions = data.actions || {};
-        const showActions = (actions.canEdit || actions.canDelete || rowActions.length > 0) && Array.isArray(data.keys);
+        const showActions = (actions.canView || actions.canEdit || actions.canDelete || rowActions.length > 0) && Array.isArray(data.keys);
+        const importItem = $('menu-import');
+        if (importItem) importItem.classList.toggle('d-none', !actions.canImport);
         lastRowCount = data.rows.length;
         const addButton = $('record-add');
         if (addButton) addButton.classList.toggle('d-none', !actions.canAdd);
@@ -110,6 +117,7 @@
                 if (showActions) {
                     const key = data.keys[r];
                     const buttons = [];
+                    if (key != null && actions.canView) buttons.push(el('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary', text: 'Lihat', onclick: () => openView(key, row) }));
                     if (key != null && actions.canEdit) buttons.push(el('button', { type: 'button', class: 'btn btn-sm btn-outline-primary', text: 'Ubah', onclick: () => openEdit(key) }));
                     if (key != null && actions.canDelete) buttons.push(el('button', { type: 'button', class: 'btn btn-sm btn-outline-danger', text: 'Hapus', onclick: () => openDelete(key, row) }));
                     if (key != null) {
@@ -189,6 +197,173 @@
         state.skip = 0;
         load();
     });
+
+    // ---- filters: values in the URL under the filter's name; a select may read its choices from a lookup ----
+    const filterInputs = () => [...document.querySelectorAll('[data-filter]')];
+    const filterValue = (name) => { const hit = others.find(([k]) => k.toLowerCase() === name.toLowerCase()); return hit ? hit[1] : ''; };
+
+    function syncFilterInputs() {
+        filterInputs().forEach((input) => {
+            const v = filterValue(input.dataset.filter);
+            if (input.tagName === 'SELECT' && v !== '' && ![...input.options].some((o) => o.value === v)) {
+                input.appendChild(el('option', { value: v, text: v }));
+            }
+            input.value = v;
+        });
+        updateFilterCount();
+    }
+    function updateFilterCount() {
+        const badge = $('filter-count');
+        if (!badge) return;
+        const active = filterNames.filter((n) => filterValue(n) !== '').length;
+        badge.textContent = String(active);
+        badge.classList.toggle('d-none', active === 0);
+        const panel = $('filter-panel');
+        if (active > 0 && panel && panel.classList.contains('d-none')) toggleFilterPanel(true);
+    }
+    function toggleFilterPanel(open) {
+        const panel = $('filter-panel');
+        if (!panel) return;
+        panel.classList.toggle('d-none', !open);
+        $('filter-toggle').setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+    function readFilters() {
+        for (let i = others.length - 1; i >= 0; i--) if (filterNames.includes(others[i][0].toLowerCase())) others.splice(i, 1);
+        filterInputs().forEach((input) => {
+            const v = input.value.trim();
+            if (v !== '') others.push([input.dataset.filter, v]);
+        });
+        state.skip = 0;
+        updateFilterCount();
+        load();
+    }
+    async function loadFilterLookups() {
+        await Promise.all(filterInputs().filter((i) => i.dataset.filterLookup === '1').map(async (select) => {
+            const url = (root.dataset.filterLookupUrl || '').replace('__NAME__', encodeURIComponent(select.dataset.filter));
+            try {
+                const res = await fetch(url, { headers: { Accept: 'application/json' } });
+                const data = res.ok ? await res.json() : null;
+                if (!data) return;
+                data.items.forEach((item) => select.appendChild(el('option', { value: item.value, text: item.text })));
+            } catch (e) { /* the filter stays usable with "Semua" */ }
+        }));
+        syncFilterInputs();
+    }
+    if ($('filter-form')) {
+        $('filter-toggle').addEventListener('click', () => toggleFilterPanel($('filter-panel').classList.contains('d-none')));
+        $('filter-form').addEventListener('submit', (ev) => { ev.preventDefault(); readFilters(); });
+        $('filter-clear').addEventListener('click', () => { filterInputs().forEach((i) => { i.value = ''; }); readFilters(); });
+        syncFilterInputs();
+        loadFilterLookups();
+    }
+
+    // ---- menu: refresh, export (this page / everything) and import ----
+    function downloadName(res) {
+        const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(res.headers.get('Content-Disposition') || '');
+        return m ? decodeURIComponent(m[1]) : 'data.csv';
+    }
+    async function exportCsv(all, button) {
+        clearMessage();
+        const p = new URLSearchParams(query());
+        if (all) { p.delete('_skip'); p.delete('_take'); p.set('_all', '1'); }
+        if (button) button.disabled = true;
+        try {
+            const res = await fetch(root.dataset.exportUrl + '?' + p.toString(), { headers: { Accept: 'text/csv' } });
+            if (!res.ok) {
+                let message = 'Export gagal (HTTP ' + res.status + ').';
+                try { message = (await res.json()).message || message; } catch (e) { /* not JSON */ }
+                showMessage(message, false);
+                return;
+            }
+            const blob = await res.blob();
+            const link = el('a', { href: URL.createObjectURL(blob), download: downloadName(res) });
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            setTimeout(() => URL.revokeObjectURL(link.href), 2000);
+            const rows = res.headers.get('X-Rakit-Export-Rows');
+            showMessage('Export selesai' + (rows ? ' (' + rows + ' baris)' : '') + '.' +
+                (res.headers.get('X-Rakit-Export-Truncated') === '1' ? ' Hasil dipotong di ' + rows + ' baris: persempit dengan pencarian atau filter.' : ''), true);
+        } catch (e) {
+            showMessage('Server tidak dapat dihubungi.', false);
+        } finally {
+            if (button) button.disabled = false;
+        }
+    }
+    if ($('menu-refresh')) $('menu-refresh').addEventListener('click', () => { clearMessage(); load(); });
+    if ($('menu-export')) $('menu-export').addEventListener('click', (ev) => exportCsv(false, ev.currentTarget));
+    if ($('menu-export-all')) $('menu-export-all').addEventListener('click', (ev) => exportCsv(true, ev.currentTarget));
+
+    // -- import
+    if ($('import-form')) {
+        $('menu-import').addEventListener('click', () => {
+            $('import-file').value = '';
+            $('import-alert').classList.add('d-none');
+            $('import-result').replaceChildren();
+            window.RakitRecordForm.modalOf('import-modal').show();
+        });
+        $('import-form').addEventListener('submit', async (ev) => {
+            ev.preventDefault();
+            const file = $('import-file').files[0];
+            const alertBox = $('import-alert');
+            alertBox.classList.add('d-none');
+            $('import-result').replaceChildren();
+            if (!file) { alertBox.textContent = 'Pilih file CSV dulu.'; alertBox.classList.remove('d-none'); return; }
+            const body = new FormData();
+            body.append('file', file);
+            $('import-run').disabled = true;
+            const res = await window.RakitRecordForm.create({ root: root, form: null }).send('POST', root.dataset.importUrl, body);
+            $('import-run').disabled = false;
+            if (!res.ok || !res.data || res.data.total === undefined) {
+                alertBox.textContent = (res.data && res.data.message) || 'Impor gagal (HTTP ' + res.status + ').';
+                alertBox.classList.remove('d-none');
+                return;
+            }
+            const d = res.data;
+            const parts = [el('div', { class: 'alert alert-' + (d.imported === d.total ? 'success' : d.imported === 0 ? 'danger' : 'warning'), role: 'status',
+                text: d.imported + ' dari ' + d.total + ' baris tersimpan' + (d.total - d.imported > 0 ? ', ' + (d.total - d.imported) + ' gagal' : '') + '.' })];
+            d.notes.forEach((n) => parts.push(el('div', { class: 'small text-muted mb-1', text: n })));
+            if (d.failures.length > 0) {
+                parts.push(el('div', { class: 'table-responsive border', style: 'max-height: 240px; overflow: auto' }, [
+                    el('table', { class: 'table table-sm mb-0' }, [
+                        el('thead', {}, [el('tr', {}, [el('th', { text: 'Baris' }), el('th', { text: 'Alasan' })])]),
+                        el('tbody', {}, d.failures.map((f) => el('tr', {}, [el('td', { text: String(f.row) }), el('td', { text: f.message })]))),
+                    ]),
+                ]));
+                if (d.total - d.imported > d.failures.length) parts.push(el('div', { class: 'small text-muted mt-1', text: 'Hanya ' + d.failures.length + ' kegagalan pertama yang ditampilkan.' }));
+            }
+            $('import-result').replaceChildren(...parts);
+            if (d.imported > 0) { state.skip = 0; load(); }
+        });
+    }
+
+    // ---- the read-only view of a record ("Lihat") ----
+    async function openView(key, row) {
+        clearMessage();
+        const alertBox = $('view-alert');
+        alertBox.classList.add('d-none');
+        $('view-body').replaceChildren();
+        const label = row.find((v) => v != null && String(v).trim() !== '');
+        $('view-title').textContent = 'Detail' + (label != null ? ': ' + label : '');
+        window.RakitRecordForm.modalOf('view-modal').show();
+        const res = await window.RakitRecordForm.create({ root: root, form: null }).send('GET', (root.dataset.viewUrl || '').replace('__KEY__', encodeURIComponent(key)));
+        if (!res.ok) {
+            alertBox.textContent = (res.data && res.data.message) || 'Detail tidak dapat dimuat (HTTP ' + res.status + ').';
+            alertBox.classList.remove('d-none');
+            return;
+        }
+        const list = el('dl', { class: 'row mb-0' });
+        res.data.items.forEach((item) => {
+            if (item.isSection) {
+                list.appendChild(el('div', { class: 'col-12' }, [el('h3', { class: 'h6 border-bottom pb-1 mt-3 mb-1', text: item.label }),
+                    item.text ? el('p', { class: 'small text-muted mb-1', text: item.text }) : el('span')]));
+                return;
+            }
+            list.appendChild(el('dt', { class: 'col-sm-4 text-muted fw-normal', text: item.label }));
+            list.appendChild(el('dd', { class: 'col-sm-8' }, [item.text === null ? el('span', { class: 'text-muted', text: '-' }) : document.createTextNode(item.text)]));
+        });
+        $('view-body').replaceChildren(list);
+    }
 
     // ---- record actions: add / edit / delete ----
     // The form helpers (calls, field errors, select options, browse picker) live in record-form.js, shared with the Form page.

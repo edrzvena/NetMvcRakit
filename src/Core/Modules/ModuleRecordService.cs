@@ -7,6 +7,9 @@ using Rakit.Core.Sql;
 
 namespace Rakit.Core.Modules;
 
+/// <summary>One line of the read-only record view. A section is a heading (<paramref name="Label"/>) with an optional description in <paramref name="Text"/>.</summary>
+public sealed record ModuleRecordViewItem(string Label, string? Text, bool IsSection = false);
+
 public interface IModuleRecordService
 {
     /// <summary>
@@ -20,6 +23,13 @@ public interface IModuleRecordService
     /// <exception cref="ModuleRecordNotFoundException">The data source returned no row.</exception>
     /// <exception cref="SqlExecutionException"/>
     Task<IReadOnlyDictionary<string, string?>> GetAsync(Guid moduleId, string key, ParameterContext context, CancellationToken ct = default);
+
+    /// <summary>
+    /// The record as read-only text for the "Lihat" modal (display.buttons.detail): the form's fields (section headings included)
+    /// with their values formatted by type, or the Display columns when the module has no form. Same data source and errors as
+    /// <see cref="GetAsync"/>; a module that does not offer the detail view is not configured for it (<c>NotConfigured</c>).
+    /// </summary>
+    Task<IReadOnlyList<ModuleRecordViewItem>> ViewAsync(Guid moduleId, string key, ParameterContext context, CancellationToken ct = default);
 
     /// <summary>Validates <paramref name="values"/> against the module's form and runs the Insert data source.</summary>
     /// <exception cref="ModuleNotFoundException"/>
@@ -63,6 +73,77 @@ public sealed class ModuleRecordService(
     {
         ArgumentNullException.ThrowIfNull(context);
         var module = await GetPublishedAsync(moduleId, ct);
+        var list = await LoadRecordAsync(module, key, context, ct);
+
+        var row = list.Rows[0];
+        var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var field in module.Config.Form.DataFields)
+        {
+            var name = field.Name.Trim();
+            var index = IndexOf(list.Columns, name);
+            values[name] = index >= 0 && index < row.Count ? FormatForInput(field.Type, row[index]) : null;
+        }
+        return values;
+    }
+
+    public async Task<IReadOnlyList<ModuleRecordViewItem>> ViewAsync(
+        Guid moduleId, string key, ParameterContext context, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var module = await GetPublishedAsync(moduleId, ct);
+        if (!module.Config.Display.Buttons.Detail)
+            throw new ModuleRecordUnavailableException("Aksi ini tidak tersedia untuk halaman ini.", "the module does not offer the detail view", notConfigured: true);
+
+        var list = await LoadRecordAsync(module, key, context, ct);
+        var row = list.Rows[0];
+        object? Cell(string name) => IndexOf(list.Columns, name) is var i and >= 0 && i < row.Count ? row[i] : null;
+
+        var items = new List<ModuleRecordViewItem>();
+        var fields = module.Config.Form.Fields;
+        if (fields.Any(f => !f.IsSection))
+        {
+            foreach (var field in fields)
+            {
+                var name = field.Name.Trim();
+                var label = string.IsNullOrWhiteSpace(field.Label) ? name : field.Label.Trim();
+                if (field.IsSection) { items.Add(new ModuleRecordViewItem(label, field.Help, IsSection: true)); continue; }
+
+                var value = Cell(name);
+                string? text;
+                if (field.Type == FormFieldType.Select && field.Options is { Count: > 0 } options && ModuleFieldValue.ToText(value) is { } stored)
+                    text = options.FirstOrDefault(o => string.Equals(o.Value?.Trim(), stored, StringComparison.Ordinal))?.Text is { Length: > 0 } t ? t : stored;
+                else
+                    text = ModuleCellFormatter.Format(value, ColumnFormatOf(field.Type));
+                items.Add(new ModuleRecordViewItem(label, text));
+            }
+        }
+        else
+        {
+            foreach (var column in module.Config.Display.Columns.Where(c => c.Visible))
+            {
+                var name = column.Field.Trim();
+                items.Add(new ModuleRecordViewItem(string.IsNullOrWhiteSpace(column.Label) ? name : column.Label.Trim(), ModuleCellFormatter.Format(Cell(name), column.Format)));
+            }
+            // no configured columns: everything the Detail data source returned
+            if (items.Count == 0)
+                for (var i = 0; i < list.Columns.Count; i++)
+                    items.Add(new ModuleRecordViewItem(list.Columns[i], ModuleCellFormatter.Plain(i < row.Count ? row[i] : null)));
+        }
+        return items;
+    }
+
+    private static ColumnFormat ColumnFormatOf(FormFieldType type) => type switch
+    {
+        FormFieldType.Number => ColumnFormat.Number,
+        FormFieldType.Date => ColumnFormat.Date,
+        FormFieldType.DateTime => ColumnFormat.DateTime,
+        FormFieldType.Boolean => ColumnFormat.Boolean,
+        _ => ColumnFormat.Text,
+    };
+
+    /// <summary>The Detail data source's result for a key, which has at least one row (otherwise <see cref="ModuleRecordNotFoundException"/>).</summary>
+    private async Task<DataTableResult> LoadRecordAsync(Module module, string key, ParameterContext context, CancellationToken ct)
+    {
         var dataSourceId = SourceOf(module, RecordAction.Detail);
         var normalizedKey = NormalizeKey(key);
 
@@ -83,17 +164,8 @@ public sealed class ModuleRecordService(
         }
 
         var list = result.List;
-        if (list is null || list.Rows.Count == 0) throw new ModuleRecordNotFoundException(moduleId);
-
-        var row = list.Rows[0];
-        var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-        foreach (var field in module.Config.Form.Fields)
-        {
-            var name = field.Name.Trim();
-            var index = IndexOf(list.Columns, name);
-            values[name] = index >= 0 && index < row.Count ? FormatForInput(field.Type, row[index]) : null;
-        }
-        return values;
+        if (list is null || list.Rows.Count == 0) throw new ModuleRecordNotFoundException(module.Id);
+        return list;
     }
 
     public async Task InsertAsync(
@@ -225,7 +297,7 @@ public sealed class ModuleRecordService(
         var form = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         var errors = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var field in module.Config.Form.Fields)
+        foreach (var field in module.Config.Form.DataFields)
         {
             var name = field.Name.Trim();
             var label = string.IsNullOrWhiteSpace(field.Label) ? name : field.Label.Trim();
@@ -254,6 +326,19 @@ public sealed class ModuleRecordService(
 
             if (ModuleFieldValue.IsText(field.Type))
             {
+                if (field.Type is FormFieldType.Email or FormFieldType.Url && !ModuleFieldValue.IsValid(field.Type, text))
+                {
+                    errors[name] = field.Type == FormFieldType.Email
+                        ? $"{label} bukan alamat email yang valid."
+                        : $"{label} bukan alamat web (http atau https) yang valid.";
+                    continue;
+                }
+                if (field.Type == FormFieldType.Select && field.Options is { Count: > 0 } options
+                    && !options.Any(o => string.Equals(o.Value?.Trim(), text, StringComparison.Ordinal)))
+                {
+                    errors[name] = $"{label}: pilihan tidak valid.";
+                    continue;
+                }
                 if (field.MaxLength is { } max && text.Length > max)
                 {
                     errors[name] = $"{label} maksimal {max} karakter.";
@@ -275,12 +360,28 @@ public sealed class ModuleRecordService(
                 };
                 continue;
             }
+            else if (RangeError(field, label, text) is { } rangeError)
+            {
+                errors[name] = rangeError;
+                continue;
+            }
 
             form[name] = text;
         }
 
         if (errors.Count > 0) throw new ModuleRecordValidationException(errors);
         return form;
+    }
+
+    /// <summary>Why a valid number / date is outside the field's Min / Max, or null when it is inside (or the field has none).</summary>
+    private static string? RangeError(ModuleFormField field, string label, string text)
+    {
+        if (!ModuleFieldValue.HasRange(field.Type)) return null;
+        var min = field.Min?.Trim();
+        var max = field.Max?.Trim();
+        if (!string.IsNullOrEmpty(min) && ModuleFieldValue.Compare(field.Type, text, min) is < 0) return $"{label} minimal {min}.";
+        if (!string.IsNullOrEmpty(max) && ModuleFieldValue.Compare(field.Type, text, max) is > 0) return $"{label} maksimal {max}.";
+        return null;
     }
 
     /// <summary>The whole value has to match the pattern; a pattern that runs past its time limit counts as a failure too.</summary>
