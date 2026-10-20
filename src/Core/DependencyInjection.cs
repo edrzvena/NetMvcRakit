@@ -5,6 +5,7 @@ using Rakit.Core.Config;
 using Rakit.Core.Data;
 using Rakit.Core.DataSources;
 using Rakit.Core.Health;
+using Rakit.Core.Modules;
 using Rakit.Core.Procedures;
 using Rakit.Core.Schema;
 using Rakit.Core.Sql;
@@ -35,6 +36,9 @@ public static class DependencyInjection
         services.AddSingleton<IParameterResolver, ParameterResolver>();
         services.AddSingleton<ITableQueryBuilder, TableQueryBuilder>();
         services.AddSingleton<IDataSourceService, DataSourceService>();
+        services.AddSingleton<IModuleRepository, ModuleRepository>();
+        services.AddSingleton<IModuleGroupRepository, ModuleGroupRepository>();
+        services.AddSingleton<IMenuRepository, MenuRepository>();
 
         return services;
     }
