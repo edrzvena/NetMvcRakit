@@ -57,6 +57,12 @@
             <div class="tab-content">
                 <div class="tab-pane fade show active" id="pg-pane-query" role="tabpanel" aria-labelledby="pg-tab-query">
                     <div class="pg-qtabs" id="pg-qtabs" role="tablist" aria-label="Tab query"></div>
+                    <div id="pg-empty" class="text-center text-muted border rounded py-5 d-none">
+                        <i class="bi bi-terminal fs-2 d-block mb-2"></i>
+                        Belum ada tab query. Klik <i class="bi bi-plus-lg"></i> di atas, atau klik kanan sebuah objek di daftar kiri lalu pilih <em>Query baru</em>.
+                    </div>
+                    <div id="pg-empty-note" class="alert d-none" role="alert"></div>
+                    <div id="pg-query-body">
                     <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
                         <button type="button" class="btn btn-primary btn-sm" id="pg-run"><i class="bi bi-play-fill"></i> Jalankan <kbd class="ms-1">Ctrl+Enter</kbd></button>
                         <button type="button" class="btn btn-outline-danger btn-sm d-none" id="pg-cancel"><i class="bi bi-stop-fill"></i> Batal</button>
@@ -103,6 +109,7 @@
                     </div>
 
                     <div id="pg-results"><div class="text-muted small">Hasil muncul di sini.</div></div>
+                    </div>
                 </div>
 
                 <div class="tab-pane fade" id="pg-pane-structure" role="tabpanel" aria-labelledby="pg-tab-structure">

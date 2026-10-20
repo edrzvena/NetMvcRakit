@@ -96,6 +96,7 @@
     let tabCounter = 0;
     let saveTimer = 0;
     const tabStrip = $('pg-qtabs');
+    const blankSession = ace.createEditSession('', 'ace/mode/sql'); // what the (hidden) editor holds while there is no tab
 
     function saveTabs() {
         store.set(TABS_KEY, JSON.stringify({
@@ -152,8 +153,23 @@
         $('pg-cancel').classList.toggle('d-none', !busy);
     }
 
+    /** No tab left: the editor, the toolbar and the results are hidden until a tab is opened (+ or the tree). */
+    function showEmpty() {
+        active = null;
+        tabCounter = 0; // the next tab is "Query 1" again
+        editor.setSession(blankSession);
+        $('pg-query-body').classList.add('d-none');
+        $('pg-empty').classList.remove('d-none');
+        renderTabs();
+        syncRun();
+        scheduleSave();
+    }
+
     function activate(tab, focus) {
         active = tab;
+        $('pg-query-body').classList.remove('d-none');
+        $('pg-empty').classList.add('d-none');
+        $('pg-empty-note').classList.add('d-none');
         editor.setSession(tab.session);
         $('pg-results').replaceChildren(tab.results);
         renderTabs();
@@ -177,7 +193,8 @@
         if (tab.controller) tab.controller.abort();
         const index = tabs.indexOf(tab);
         tabs.splice(index, 1);
-        if (tabs.length === 0) activate(createTab('', null), true);
+        if (active === tab) editor.setSession(blankSession);
+        if (tabs.length === 0) showEmpty();
         else if (active === tab) activate(tabs[Math.min(index, tabs.length - 1)], true);
         else { renderTabs(); scheduleSave(); }
         tab.session.destroy();
@@ -221,6 +238,8 @@
             tabCounter = Number(saved.counter) || saved.tabs.length;
             saved.tabs.slice(0, MAX_TABS).forEach((t) => { createTab(String((t && t.sql) || ''), String((t && t.title) || 'Query').slice(0, 40)).ran = true; });
             activate(tabs[Math.min(Math.max(0, Number(saved.active) || 0), tabs.length - 1)]);
+        } else if (saved && Array.isArray(saved.tabs)) {
+            showEmpty(); // the user closed every tab: keep it that way
         } else {
             // the single draft of the one-editor version, or a sample
             activate(createTab(store.get('rakit-pg-draft') || 'SELECT TOP (10) * FROM app.Customers;\n', null));
@@ -316,7 +335,15 @@
 
     /** A message in a tab's results box (the active tab unless told otherwise). */
     function showNotice(kind, text, tab) {
-        (tab || active).results.replaceChildren(el('div', { class: 'alert alert-' + kind + ' mb-0', role: 'alert', text: text }));
+        const target = tab || active;
+        if (!target) {
+            // no tab is open: the message goes into the empty state
+            const note = $('pg-empty-note');
+            note.className = 'alert alert-' + kind + ' mt-3';
+            note.textContent = text;
+            return;
+        }
+        target.results.replaceChildren(el('div', { class: 'alert alert-' + kind + ' mb-0', role: 'alert', text: text }));
     }
 
     const number = (n) => Number(n).toLocaleString('id-ID');
