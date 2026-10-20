@@ -60,8 +60,14 @@
         <li class="nav-item" role="presentation" data-types="table form">
             <button class="nav-link" id="tab-form" data-bs-toggle="tab" data-bs-target="#pane-form" type="button" role="tab" aria-controls="pane-form" aria-selected="false">Form</button>
         </li>
+        <li class="nav-item" role="presentation" data-types="widget">
+            <button class="nav-link" id="tab-widget" data-bs-toggle="tab" data-bs-target="#pane-widget" type="button" role="tab" aria-controls="pane-widget" aria-selected="false">Widget</button>
+        </li>
         <li class="nav-item" role="presentation" data-types="table">
             <button class="nav-link" id="tab-preview" data-bs-toggle="tab" data-bs-target="#pane-preview" type="button" role="tab" aria-controls="pane-preview" aria-selected="false">Preview</button>
+        </li>
+        <li class="nav-item" role="presentation" data-types="widget">
+            <button class="nav-link" id="tab-visual-preview" data-bs-toggle="tab" data-bs-target="#pane-visual-preview" type="button" role="tab" aria-controls="pane-visual-preview" aria-selected="false">Preview</button>
         </li>
     </ul>
 
@@ -87,6 +93,7 @@
                             <option value="Table" selected="@(Model.Type == ModuleType.Table)">Table (daftar + CRUD)</option>
                             <option value="Form" selected="@(Model.Type == ModuleType.Form)">Form (input berdiri sendiri)</option>
                             <option value="Page" selected="@(Model.Type == ModuleType.Page)">Page / Html (halaman bebas)</option>
+                            <option value="Widget" selected="@(Model.Type == ModuleType.Widget)">Widget (kartu angka / KPI)</option>
                         </select>
                         <div class="form-text">Tidak bisa diubah setelah disimpan.</div>
                     }
@@ -108,8 +115,8 @@
                 <textarea class="form-control" id="Description" name="Description" rows="2" maxlength="500">@Model.Description</textarea>
             </div>
 
-            <div class="border rounded p-3 mb-3" data-types="table">
-                <h2 class="h5">Sumber data: List</h2>
+            <div class="border rounded p-3 mb-3" data-types="table widget">
+                <h2 class="h5" id="list-source-title" data-title-table="Sumber data: List" data-title-widget="Sumber data: Nilai (baris pertama dipakai)">Sumber data: List</h2>
                 @if (Model.DataSourceUnavailable)
                 {
                     <div class="alert alert-warning">
@@ -128,6 +135,7 @@
                     Hanya data source bertipe Query yang bisa dipilih. Mode, prosedur, parameter, dan flag diatur di
                     <a asp-area="Builder" asp-controller="DataSource" asp-action="Index">Data Source</a>.
                     Parameter yang dibaca dari URL halaman (QueryString) otomatis tersedia untuk mapping data source.
+                    <span data-types="widget">Widget hanya membaca <strong>baris pertama</strong> hasilnya; urutkan atau ringkas di data source.</span>
                 </div>
             </div>
 
@@ -267,6 +275,98 @@
             </div>
         </div>
 
+        @* ---------------- Widget ---------------- *@
+        <div class="tab-pane fade" id="pane-widget" role="tabpanel" aria-labelledby="tab-widget">
+            <div class="border rounded p-3 mb-3">
+                <h2 class="h5">Kartu widget</h2>
+                <p class="small text-muted">
+                    Satu kartu dari <strong>baris pertama</strong> hasil data source. Nilainya diformat di server, jadi halaman runtime menampilkan persis seperti preview.
+                </p>
+                <div class="mb-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="widget-load-columns">Muat kolom dari data source</button>
+                    <span id="widget-columns-status" class="ms-2 small text-muted" aria-live="polite"></span>
+                </div>
+                <datalist id="widget-columns"></datalist>
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label" for="widget-valueField">Kolom nilai</label>
+                        <input class="form-control" id="widget-valueField" list="widget-columns" maxlength="128" placeholder="mis. Total" autocomplete="off" />
+                        <div class="form-text text-warning d-none" id="widget-valueField-warn">Kolom ini tidak ada di hasil data source.</div>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label" for="widget-label">Label tetap</label>
+                        <input class="form-control" id="widget-label" maxlength="100" placeholder="mis. Pelanggan" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label" for="widget-labelField">Atau kolom label</label>
+                        <input class="form-control" id="widget-labelField" list="widget-columns" maxlength="128" placeholder="kosong = pakai label tetap" autocomplete="off" />
+                        <div class="form-text" id="widget-labelField-help">Bila diisi dan tidak kosong, kolom ini menang atas label tetap.</div>
+                        <div class="form-text text-warning d-none" id="widget-labelField-warn">Kolom ini tidak ada di hasil data source.</div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label" for="widget-format">Format nilai</label>
+                        <select class="form-select" id="widget-format">
+                            <option value="number">Number</option>
+                            <option value="text">Text</option>
+                            <option value="date">Date</option>
+                            <option value="dateTime">DateTime</option>
+                            <option value="boolean">Boolean</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label" for="widget-decimals">Desimal</label>
+                        <input class="form-control" type="number" id="widget-decimals" min="0" max="@ModuleWidget.MaxDecimals" value="0" />
+                        <div class="form-text">Hanya untuk Number.</div>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label" for="widget-prefix">Awalan</label>
+                        <input class="form-control" id="widget-prefix" maxlength="@ModuleWidget.MaxAffixLength" placeholder="mis. Rp " />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label" for="widget-suffix">Akhiran</label>
+                        <input class="form-control" id="widget-suffix" maxlength="@ModuleWidget.MaxAffixLength" placeholder="mis. %" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label" for="widget-color">Warna kartu</label>
+                        <select class="form-select" id="widget-color">
+                            @foreach (var c in ModuleWidget.Colors)
+                            {
+                                <option value="@c">@(char.ToUpperInvariant(c[0]) + c[1..])</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label" for="widget-refreshSeconds">Muat ulang otomatis (detik)</label>
+                        <input class="form-control" type="number" id="widget-refreshSeconds" min="0" max="@ModuleWidget.MaxRefreshSeconds" value="0" />
+                        <div class="form-text">0 = tidak; selain itu @ModuleWidget.MinRefreshSeconds sampai @ModuleWidget.MaxRefreshSeconds.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @* ---------------- Preview (Widget) ---------------- *@
+        <div class="tab-pane fade" id="pane-visual-preview" role="tabpanel" aria-labelledby="tab-visual-preview">
+            <div class="border rounded p-3 mb-3">
+                <h2 class="h5">Preview (Draft)</h2>
+                <div class="row g-2 mb-2 align-items-end">
+                    <div class="col-md-6">
+                        <label class="form-label small" for="visual-preview-query">Query string halaman</label>
+                        <input class="form-control form-control-sm" id="visual-preview-query" placeholder="mis. id=2" />
+                    </div>
+                    <div class="col-auto">
+                        <button type="button" class="btn btn-sm btn-success" id="visual-preview-run">Run Preview</button>
+                    </div>
+                </div>
+                <span id="visual-preview-status" class="small text-muted" aria-live="polite"></span>
+                <div id="visual-preview-host" class="mt-2 col-sm-8 col-md-5 col-lg-4" aria-live="polite"></div>
+                <div class="form-text mt-2">
+                    Memakai isi form yang sedang diisi (tanpa perlu disimpan) dan jalur preview data source: hanya statement Query,
+                    prosedur dijalankan di dalam transaksi yang di-rollback. Kartu digambar dengan renderer yang sama dengan halaman runtime;
+                    muat ulang otomatis tidak berjalan di preview.
+                </div>
+            </div>
+        </div>
+
         @* ---------------- Preview ---------------- *@
         <div class="tab-pane fade" id="pane-preview" role="tabpanel" aria-labelledby="tab-preview">
             <div class="border rounded p-3 mb-3">
@@ -302,5 +402,6 @@
 </form>
 
 @section Scripts {
+    <script src="~/js/chart-render.js" asp-append-version="true"></script>
     <script src="~/js/module-form.js" asp-append-version="true"></script>
 }

@@ -10,6 +10,7 @@ using Rakit.Core.Modules;
 using Rakit.Core.Schema;
 using Rakit.Core.Sql;
 using Rakit.Web.Areas.Builder.Models;
+using Rakit.Web.Areas.Object.Models;
 
 namespace Rakit.Web.Areas.Builder.Controllers;
 
@@ -20,6 +21,7 @@ public class ModuleController(
     IDataSourceRepository dataSources,
     IDataSourceService dataSourceService,
     IModuleRuntimeService runtime,
+    IModuleVisualService visual,
     IOptions<RakitDbOptions> dbOptions,
     ILogger<ModuleController> logger) : Controller
 {
@@ -49,7 +51,7 @@ public class ModuleController(
         var module = await modules.GetAsync(id, ct);
         if (module is null) return NotFound();
 
-        var problem = (module.Type == ModuleType.Table ? await ListSourceProblemAsync(module.Config.Source.List?.DataSourceId, ct) : null)
+        var problem = (HasListSource(module.Type) ? await ListSourceProblemAsync(module.Config.Source.List?.DataSourceId, module.Type, ct) : null)
             ?? (await RecordSourceProblemsAsync(module.Config, ct)).FirstOrDefault();
         if (problem is not null)
         {
@@ -247,6 +249,39 @@ public class ModuleController(
     });
 
     /// <summary>
+    /// Preview of a Widget (later also Chart) module that is not saved: the form's own state, run through the data source's
+    /// preview path, answered with the same JSON the runtime page loads so the browser draws it with the same renderer.
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    public Task<IActionResult> PreviewVisual([FromBody] VisualPreviewRequest request, CancellationToken ct) => BuilderJsonAsync(async () =>
+    {
+        ModuleConfig config;
+        try
+        {
+            config = request.Config.ValueKind == JsonValueKind.Object ? ModuleJson.Deserialize(request.Config.GetRawText()) : new ModuleConfig();
+        }
+        catch (JsonException)
+        {
+            return JsonError(400, "Config tidak dapat dibaca.");
+        }
+        if (!Enum.TryParse<ModuleType>(request.Type, ignoreCase: true, out var type) || type != ModuleType.Widget)
+            return JsonError(400, "Preview ini hanya untuk module Widget.");
+
+        config.Source = new ModuleSource { List = Ref(request.DataSourceId) };
+        config.Form = new ModuleForm();
+        config.Display = new ModuleDisplay();
+        var input = new ModuleInput
+        {
+            Name = string.IsNullOrWhiteSpace(request.Name) ? "preview" : request.Name.Trim(),
+            Type = type,
+            Config = config,
+        };
+
+        var result = await visual.PreviewWidgetAsync(input, QueryContext(request.Query), ct);
+        return Json(ObjectVisualMapping.ToWidget(result));
+    });
+
+    /// <summary>
     /// Page module preview: the HTML as it will be stored (sanitized) with each embedded module shown as a labelled box
     /// (name, type, status). The browser shows it inside a sandboxed iframe without scripts.
     /// </summary>
@@ -307,6 +342,7 @@ public class ModuleController(
         {
             ModuleType.Form => new ModuleSource { Insert = Ref(model.InsertDataSourceId) },
             ModuleType.Page => new ModuleSource(),
+            ModuleType.Widget or ModuleType.Chart => new ModuleSource { List = Ref(model.DataSourceId) },
             _ => new ModuleSource
             {
                 List = Ref(model.DataSourceId),
@@ -319,6 +355,12 @@ public class ModuleController(
         if (model.Type == ModuleType.Page)
         {
             config.Page = new ModulePage { Html = model.PageHtml ?? "" };
+            config.Form = new ModuleForm();
+            config.Display = new ModuleDisplay();
+        }
+        if (model.Type is ModuleType.Widget or ModuleType.Chart)
+        {
+            // Only its own settings count: no record form, no table columns.
             config.Form = new ModuleForm();
             config.Display = new ModuleDisplay();
         }
@@ -336,7 +378,7 @@ public class ModuleController(
         if (errors.Count > 0) return null;
 
         // The module only stores the data source's id, so this is where a wrong or unsuitable one is caught.
-        if (model.Type == ModuleType.Table && await ListSourceProblemAsync(model.DataSourceId, ct) is { } problem)
+        if (HasListSource(model.Type) && await ListSourceProblemAsync(model.DataSourceId, model.Type, ct) is { } problem)
         {
             ModelState.AddModelError("", problem);
             return null;
@@ -405,6 +447,9 @@ public class ModuleController(
         return errors;
     }
 
+    /// <summary>Table, Chart and Widget modules read their data from a List data source; Form and Page modules do not.</summary>
+    private static bool HasListSource(ModuleType type) => type is ModuleType.Table or ModuleType.Chart or ModuleType.Widget;
+
     private static DataSourceRef? Ref(Guid? id) => id is { } value ? new DataSourceRef { DataSourceId = value } : null;
 
     /// <summary>
@@ -424,9 +469,9 @@ public class ModuleController(
     }
 
     /// <summary>Why the data source cannot be a module's list source (gone, or a Command data source), or null when it is fine.</summary>
-    private async Task<string?> ListSourceProblemAsync(Guid? dataSourceId, CancellationToken ct)
+    private async Task<string?> ListSourceProblemAsync(Guid? dataSourceId, ModuleType type, CancellationToken ct)
     {
-        if (dataSourceId is null || dataSourceId == Guid.Empty) return "Module Table membutuhkan data source untuk list.";
+        if (dataSourceId is null || dataSourceId == Guid.Empty) return $"Module {ModuleDisplayText.TypeLabel(type)} membutuhkan data source untuk list.";
 
         var ds = await dataSources.GetAsync(dataSourceId.Value, ct);
         if (ds is null) return "Data source tidak ditemukan.";
@@ -458,7 +503,7 @@ public class ModuleController(
         model.DataSources = queryDataSources
             .Select(d => new DataSourceOption(d.Id, d.Code, d.Name, ModuleDisplayText.ModeLabel(d.Mode)))
             .ToList();
-        model.DataSourceUnavailable = model.Type == ModuleType.Table && model.DataSourceId is { } id && queryDataSources.All(d => d.Id != id);
+        model.DataSourceUnavailable = HasListSource(model.Type) && model.DataSourceId is { } id && queryDataSources.All(d => d.Id != id);
 
         // A saved record-action id that is gone or has the wrong type is not in these lists; the view keeps it visible so saving reports it.
         model.CommandDataSources = allDataSources

@@ -81,8 +81,8 @@ public class PageController(
             // The module's type decides what the JSON is: a Table grid page, a Chart's series or a Widget's value (all published only).
             var module = await runtime.GetModuleAsync(moduleId, allowDraft: false, ct);
             var context = await HttpParameterContext.FromAsync(HttpContext, ct);
-            if (module.Type == ModuleType.Chart) return Json(ToChart(await visual.GetChartAsync(module, context, ct)));
-            if (module.Type == ModuleType.Widget) return Json(ToWidget(await visual.GetWidgetAsync(module, context, ct)));
+            if (module.Type == ModuleType.Chart) return Json(ObjectVisualMapping.ToChart(await visual.GetChartAsync(module, context, ct)));
+            if (module.Type == ModuleType.Widget) return Json(ObjectVisualMapping.ToWidget(await visual.GetWidgetAsync(module, context, ct)));
 
             var query = Request.Query;
             var result = await runtime.GetListAsync(
@@ -228,24 +228,6 @@ public class PageController(
         => Error(ex.Kind == SqlExecErrorKind.Timeout ? StatusCodes.Status504GatewayTimeout
             : ex.Kind == SqlExecErrorKind.Business ? StatusCodes.Status422UnprocessableEntity
             : StatusCodes.Status500InternalServerError, ex.Message);
-
-    internal static ObjectChartData ToChart(ModuleChartResult chart) => new(
-        chart.Kind.ToString().ToLowerInvariant(), chart.Labels,
-        chart.Series.Select(s => new ObjectChartSeries(s.Name, s.Color, s.Data)).ToList(),
-        chart.Stacked, chart.Horizontal, chart.Legend, chart.Title, chart.Truncated);
-
-    internal static ObjectWidgetData ToWidget(ModuleWidgetResult widget) => new(
-        WidgetValue(widget.Value), widget.Text, widget.Label, widget.Color, widget.RefreshSeconds);
-
-    /// <summary>The raw value for JSON: numbers and booleans as they are, anything else (dates, text, bytes) as invariant text.</summary>
-    private static object? WidgetValue(object? value) => value switch
-    {
-        null => null,
-        bool or byte or sbyte or short or ushort or int or uint or long or ulong or decimal => value,
-        float f when float.IsFinite(f) => f,
-        double d when double.IsFinite(d) => d,
-        _ => ModuleCellFormatter.Plain(value),
-    };
 
     private static ObjectActions ToActions(ModuleRecordActions actions) => new(actions.CanAdd, actions.CanEdit, actions.CanDelete);
 

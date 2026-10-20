@@ -1,6 +1,6 @@
-// Module form: the Display tab (page size, key field, columns) and the Form tab (record fields) live in the browser and are
-// serialised into the hidden ConfigJson field on submit, in the same shape the server stores. Every data source (list and
-// record actions) is a normal select: the server takes them from there.
+// Module form: the Display tab (page size, key field, columns), the Form tab (record fields) and the Widget tab live in the
+// browser and are serialised into the hidden ConfigJson field on submit, in the same shape the server stores. Every data source
+// (list and record actions) is a normal select: the server takes them from there.
 (function () {
     'use strict';
 
@@ -26,6 +26,9 @@
         ['select', 'Select (dropdown lookup)'], ['browse', 'Browse (modal cari)']];
     const isLookupType = (t) => t === 'select' || t === 'browse';
     const isTextType = (t) => t === 'text' || t === 'textarea' || isLookupType(t); // MaxLength / Regex apply (a lookup value is stored as text)
+
+    config.widget = config.widget || {};
+    const widget = config.widget; // Widget module settings, read back from the inputs by collectWidget()
 
     let known = null; // Set of lower-case column names last loaded from the data source (null = not loaded)
 
@@ -115,9 +118,11 @@
         document.querySelectorAll('[data-types]').forEach((node) => {
             node.classList.toggle('d-none', !node.dataset.types.toLowerCase().split(/\s+/).includes(type));
         });
-        $('DataSourceId').required = type === 'table'; // a hidden required select would block the submit
+        $('DataSourceId').required = type === 'table' || type === 'widget'; // a hidden required select would block the submit
         const title = $('record-sources-title');
         if (title) title.textContent = type === 'form' ? title.dataset.titleForm : title.dataset.titleTable;
+        const listTitle = $('list-source-title');
+        if (listTitle) listTitle.textContent = type === 'widget' ? listTitle.dataset.titleWidget : listTitle.dataset.titleTable;
         const active = document.querySelector('.nav-tabs .nav-link.active');
         if (active && active.closest('li').classList.contains('d-none')) $('tab-source').click(); // never stay on a tab that just disappeared
     }
@@ -312,7 +317,78 @@
             status.textContent = 'Server tidak dapat dihubungi.';
         }
     });
-    $('DataSourceId').addEventListener('change', () => { known = null; renderColumns(); });
+    $('DataSourceId').addEventListener('change', () => {
+        known = null;
+        renderColumns();
+        $('widget-columns').replaceChildren();
+        refreshWidgetWarnings();
+    });
+
+    // ---- Widget tab ----
+    const widgetInput = (name) => $('widget-' + name);
+    widgetInput('valueField').value = widget.valueField || '';
+    widgetInput('label').value = widget.label || '';
+    widgetInput('labelField').value = widget.labelField || '';
+    widgetInput('format').value = widget.format || 'number';
+    widgetInput('decimals').value = widget.decimals || 0;
+    widgetInput('prefix').value = widget.prefix || '';
+    widgetInput('suffix').value = widget.suffix || '';
+    widgetInput('color').value = widget.color || 'primary';
+    widgetInput('refreshSeconds').value = widget.refreshSeconds || 0;
+
+    // A column name that the loaded data source does not return would only show an empty card, so say so (like the Display tab).
+    function refreshWidgetWarnings() {
+        ['valueField', 'labelField'].forEach((name) => {
+            const value = widgetInput(name).value.trim();
+            $('widget-' + name + '-warn').classList.toggle('d-none', !(known !== null && value && !known.has(value.toLowerCase())));
+        });
+    }
+    ['valueField', 'labelField'].forEach((name) => widgetInput(name).addEventListener('input', refreshWidgetWarnings));
+    refreshWidgetWarnings();
+
+    $('widget-load-columns').addEventListener('click', async () => {
+        const status = $('widget-columns-status');
+        const id = dataSourceId();
+        if (!id) { status.textContent = 'Pilih data source dulu (tab Source).'; return; }
+        status.textContent = 'memuat...';
+        try {
+            const res = await postJson('/Builder/Module/LoadColumns', { dataSourceId: id });
+            if (!res.ok) { status.replaceChildren(errorBox(res, 'Kolom tidak dapat dimuat.')); return; }
+
+            known = new Set(res.data.columns.map((c) => c.name.toLowerCase()));
+            $('widget-columns').replaceChildren(...res.data.columns.map((c) => el('option', { value: c.name })));
+            // Nothing chosen yet: the first number column (else the first column) becomes the value, and its type the format.
+            if (!widgetInput('valueField').value.trim() && res.data.columns.length > 0) {
+                const pick = res.data.columns.find((c) => c.suggestedFormat === 'number') || res.data.columns[0];
+                widgetInput('valueField').value = pick.name;
+                widgetInput('format').value = pick.suggestedFormat || 'text';
+            }
+            refreshWidgetWarnings();
+            status.textContent = res.data.columns.length + ' kolom dimuat' + (res.data.hasRows ? '' : ' (data source tidak mengembalikan baris: format ditebak "text")') + '.';
+        } catch (e) {
+            status.textContent = 'Server tidak dapat dihubungi.';
+        }
+    });
+
+    function collectWidget() {
+        const out = {
+            valueField: widgetInput('valueField').value.trim(),
+            format: widgetInput('format').value,
+            decimals: parseInt(widgetInput('decimals').value, 10) || 0,
+            color: widgetInput('color').value,
+            refreshSeconds: parseInt(widgetInput('refreshSeconds').value, 10) || 0,
+        };
+        const label = widgetInput('label').value.trim();
+        const labelField = widgetInput('labelField').value.trim();
+        if (label) out.label = label;
+        if (labelField) out.labelField = labelField;
+        // prefix / suffix are kept as typed: a trailing space ("Rp ") is part of them
+        const prefix = widgetInput('prefix').value;
+        const suffix = widgetInput('suffix').value;
+        if (prefix) out.prefix = prefix;
+        if (suffix) out.suffix = suffix;
+        return out;
+    }
 
     // ---- suggest form fields from the Detail data source ----
     $('suggest-fields').addEventListener('click', async () => {
@@ -342,6 +418,9 @@
 
     // ---- config (shared by Save and Preview) ----
     function collectConfig() {
+        // A Widget has only its own settings (the server ignores Display and Form for it anyway).
+        if (currentType() === 'widget') return { widget: collectWidget(), access: config.access || { view: ['*'] } };
+
         const take = parseInt($('take').value, 10) || 10;
         const maxTake = parseInt($('maxTake').value, 10) || 100;
         const keyField = $('keyField').value.trim();
@@ -432,6 +511,34 @@
         }
     }
     $('run-preview').addEventListener('click', () => { state.skip = 0; runPreview(); });
+
+    // ---- Widget preview: the server answers with the same JSON as the runtime page, drawn by the same renderer ----
+    $('visual-preview-run').addEventListener('click', async () => {
+        const button = $('visual-preview-run');
+        const status = $('visual-preview-status');
+        const host = $('visual-preview-host');
+        button.disabled = true;
+        status.textContent = 'menjalankan...';
+        try {
+            const res = await postJson('/Builder/Module/PreviewVisual', {
+                name: $('Name').value, type: currentType(), dataSourceId: dataSourceId(),
+                config: collectConfig(), query: $('visual-preview-query').value,
+            });
+            if (res.ok && res.data) {
+                window.RakitVisual.renderWidget(host, res.data);
+                const seconds = Number(res.data.refreshSeconds);
+                status.textContent = seconds ? 'Di halaman runtime kartu dimuat ulang tiap ' + seconds + ' detik.' : '';
+            } else {
+                host.replaceChildren(errorBox(res, 'Preview gagal.'));
+                status.textContent = '';
+            }
+        } catch (e) {
+            host.replaceChildren(el('div', { class: 'alert alert-danger mb-0', text: 'Preview gagal: server tidak dapat dihubungi.' }));
+            status.textContent = '';
+        } finally {
+            button.disabled = false;
+        }
+    });
 
     renderColumns();
     renderFields();

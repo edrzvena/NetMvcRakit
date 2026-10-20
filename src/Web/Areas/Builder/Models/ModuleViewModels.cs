@@ -91,6 +91,22 @@ public sealed class ModulePreviewRequest
     public string? Search { get; set; }
 }
 
+/// <summary>Body of POST /Builder/Module/PreviewVisual: the form's own (unsaved) state of a Widget or Chart.</summary>
+public sealed class VisualPreviewRequest
+{
+    public string? Name { get; set; }
+
+    /// <summary><c>widget</c> (or <c>chart</c>, case-insensitive).</summary>
+    public string? Type { get; set; }
+    public Guid? DataSourceId { get; set; }
+
+    /// <summary>Same JSON the form saves in ConfigJson (the widget / chart part and access).</summary>
+    public JsonElement Config { get; set; }
+
+    /// <summary>Query-string text standing in for the URL of the page, e.g. <c>id=2</c>.</summary>
+    public string? Query { get; set; }
+}
+
 public sealed record PreviewColumn(string Field, string Label, bool Sortable, string Format);
 
 /// <summary>Cells are formatted with the same <see cref="ModuleCellFormatter"/> as the runtime page, so the preview looks like the page.</summary>
