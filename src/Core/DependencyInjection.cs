@@ -39,6 +39,7 @@ public static class DependencyInjection
         services.AddSingleton<IModuleRepository, ModuleRepository>();
         services.AddSingleton<IModuleGroupRepository, ModuleGroupRepository>();
         services.AddSingleton<IMenuRepository, MenuRepository>();
+        services.AddSingleton<IModuleRuntimeService, ModuleRuntimeService>();
 
         return services;
     }

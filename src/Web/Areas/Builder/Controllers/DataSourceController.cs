@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
+using Rakit.Core;
 using Rakit.Core.Config;
 using Rakit.Core.DataSources;
 using Rakit.Core.Procedures;
@@ -168,7 +169,7 @@ public class DataSourceController(
         }
         catch (Exception ex) when (ex is TableDefinitionException or SqlTemplateException or ArgumentException)
         {
-            return PreviewError(400, WithoutParameterSuffix(ex));
+            return PreviewError(400, ExceptionMessages.WithoutParameterSuffix(ex));
         }
         catch (Exception ex) when (ex is SchemaAccessDeniedException or SchemaObjectNotFoundException)
         {
@@ -186,12 +187,6 @@ public class DataSourceController(
             return PreviewError(503, "Database tidak tersedia.");
         }
     }
-
-    /// <summary>ArgumentException.Message ends with " (Parameter 'args')"; that is noise on a builder screen.</summary>
-    private static string WithoutParameterSuffix(Exception ex) =>
-        ex is ArgumentException { ParamName: { Length: > 0 } name }
-            ? ex.Message.Replace($" (Parameter '{name}')", "")
-            : ex.Message;
 
     private JsonResult PreviewError(int status, string message, IReadOnlyList<string>? errors = null, string? detail = null, string? kind = null)
     {
