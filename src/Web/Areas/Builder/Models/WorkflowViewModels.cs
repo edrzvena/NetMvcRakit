@@ -23,9 +23,15 @@ public sealed class WorkflowFormViewModel
     public string? Description { get; set; }
     public string StepsJson { get; set; } = "[]";
 
+    /// <summary>Run the DataSource steps in one SQL transaction (rolled back as a whole when a step fails).</summary>
+    public bool Transaction { get; set; }
+
     // Display only.
     public WorkflowStatus Status { get; set; } = WorkflowStatus.Draft;
     public IReadOnlyList<StepSourceOption> DataSources { get; set; } = [];
+
+    /// <summary>Modules a Module step can send the visitor to (any type; a Page too).</summary>
+    public IReadOnlyList<StepSourceOption> Modules { get; set; } = [];
     public IReadOnlyList<TrackingRow> History { get; set; } = [];
 
     public bool IsEdit => Id is not null;
@@ -39,6 +45,7 @@ public static class WorkflowDisplayText
     {
         TrackingStatus.Success => "Berhasil",
         TrackingStatus.Failed => "Gagal",
+        TrackingStatus.RolledBack => "Dibatalkan",
         _ => "Dilewati",
     };
 }

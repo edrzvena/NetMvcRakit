@@ -89,8 +89,8 @@ ORDER BY w.Name";
             {
                 cmd.Transaction = tx;
                 cmd.CommandText = @"
-INSERT INTO rakit.Workflows (Id, Code, Name, Description, Status, CreatedBy, Created)
-VALUES (@id, @code, @name, @description, N'draft', @user, @now)";
+INSERT INTO rakit.Workflows (Id, Code, Name, Description, Status, Property, CreatedBy, Created)
+VALUES (@id, @code, @name, @description, N'draft', @property, @user, @now)";
                 AddContentParameters(cmd, input);
                 cmd.Parameters.Add(new SqlParameter("@id", SqlDbType.UniqueIdentifier) { Value = id });
                 cmd.Parameters.Add(new SqlParameter("@user", SqlDbType.NVarChar, -1) { Value = user ?? "" });
@@ -121,7 +121,7 @@ VALUES (@id, @code, @name, @description, N'draft', @user, @now)";
                 cmd.Transaction = tx;
                 cmd.CommandText = @"
 UPDATE rakit.Workflows
-SET Code = @code, Name = @name, Description = @description, UpdatedBy = @user, Updated = @now
+SET Code = @code, Name = @name, Description = @description, Property = @property, UpdatedBy = @user, Updated = @now
 WHERE Id = @id AND IsDeleted = 0";
                 AddContentParameters(cmd, input);
                 cmd.Parameters.Add(new SqlParameter("@id", SqlDbType.UniqueIdentifier) { Value = id });
@@ -302,7 +302,7 @@ ORDER BY Created DESC, Id";
 
     private static WorkflowInput ToInput(Workflow w) => new()
     {
-        Code = w.Code, Name = w.Name, Description = w.Description,
+        Code = w.Code, Name = w.Name, Description = w.Description, Transaction = w.Transaction,
         // round-trip through JSON so the copy never shares objects with the source
         Steps = w.Steps.Select(s => WorkflowJson.DeserializeStep(WorkflowJson.SerializeStep(s))).ToList(),
     };
@@ -315,41 +315,97 @@ ORDER BY Created DESC, Id";
         {
             Value = string.IsNullOrWhiteSpace(input.Description) ? DBNull.Value : input.Description.Trim(),
         });
+        cmd.Parameters.Add(new SqlParameter("@property", SqlDbType.NVarChar, -1)
+        {
+            Value = WorkflowJson.SerializeSettings(new WorkflowJson.Settings { Transaction = input.Transaction }),
+        });
     }
 
-    /// <summary>Each step's ParentId is the step before it (the first has none).</summary>
+    /// <summary>
+    /// Inserts the steps in list order, then points each step's ParentId at the first step that links to it (a link may go
+    /// to a step later in the list, so the rows exist before the parents are set).
+    /// </summary>
     private static async Task InsertStepsAsync(
         SqlConnection conn, SqlTransaction tx, Guid workflowId, IReadOnlyList<WorkflowStep> steps, string? user, CancellationToken ct)
     {
-        Guid? parent = null;
-        for (var i = 0; i < steps.Count; i++)
+        var normalized = steps.Select(Normalize).ToList();
+        var ids = normalized.ToDictionary(s => s.Code, _ => Guid.NewGuid(), StringComparer.OrdinalIgnoreCase);
+
+        for (var i = 0; i < normalized.Count; i++)
         {
-            var step = steps[i];
-            var id = Guid.NewGuid();
+            var step = normalized[i];
             await using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
             cmd.CommandText = @"
 INSERT INTO rakit.Steps (Id, WorkflowId, ParentId, Data, CreatedBy, Created, [Order])
-VALUES (@id, @workflow, @parent, @data, @user, @now, @order)";
-            cmd.Parameters.Add(new SqlParameter("@id", SqlDbType.UniqueIdentifier) { Value = id });
+VALUES (@id, @workflow, NULL, @data, @user, @now, @order)";
+            cmd.Parameters.Add(new SqlParameter("@id", SqlDbType.UniqueIdentifier) { Value = ids[step.Code] });
             cmd.Parameters.Add(new SqlParameter("@workflow", SqlDbType.UniqueIdentifier) { Value = workflowId });
-            cmd.Parameters.Add(new SqlParameter("@parent", SqlDbType.UniqueIdentifier) { Value = parent is { } p ? p : DBNull.Value });
-            cmd.Parameters.Add(new SqlParameter("@data", SqlDbType.NVarChar, -1)
-            {
-                Value = WorkflowJson.SerializeStep(new WorkflowStep
-                {
-                    Code = step.Code.Trim(),
-                    Name = string.IsNullOrWhiteSpace(step.Name) ? null : step.Name.Trim(),
-                    Type = step.Type,
-                    DataSourceId = step.DataSourceId,
-                }),
-            });
+            cmd.Parameters.Add(new SqlParameter("@data", SqlDbType.NVarChar, -1) { Value = WorkflowJson.SerializeStep(step) });
             cmd.Parameters.Add(new SqlParameter("@user", SqlDbType.NVarChar, -1) { Value = user ?? "" });
             cmd.Parameters.Add(new SqlParameter("@now", SqlDbType.DateTime2) { Value = DateTime.UtcNow });
             cmd.Parameters.Add(new SqlParameter("@order", SqlDbType.Int) { Value = i });
             await cmd.ExecuteNonQueryAsync(ct);
-            parent = id;
         }
+
+        var assigned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var step in normalized)
+            foreach (var link in WorkflowGraph.LinksOf(step))
+            {
+                if (!ids.ContainsKey(link) || !assigned.Add(link)) continue;
+                await using var cmd = conn.CreateCommand();
+                cmd.Transaction = tx;
+                cmd.CommandText = "UPDATE rakit.Steps SET ParentId = @parent WHERE Id = @id";
+                cmd.Parameters.Add(new SqlParameter("@parent", SqlDbType.UniqueIdentifier) { Value = ids[step.Code] });
+                cmd.Parameters.Add(new SqlParameter("@id", SqlDbType.UniqueIdentifier) { Value = ids[link] });
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
+    }
+
+    /// <summary>The step as it is stored: trimmed, only the settings of its own type, links of a Condition in its branches only.</summary>
+    internal static WorkflowStep Normalize(WorkflowStep step)
+    {
+        static string? Link(string? code) => string.IsNullOrWhiteSpace(code) ? null : code.Trim();
+        static string? Text(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+
+        return new WorkflowStep
+        {
+            Code = step.Code.Trim(),
+            Name = Text(step.Name),
+            Type = step.Type,
+            Next = step.Type == StepType.Condition ? null : Link(step.Next),
+            X = step.X,
+            Y = step.Y,
+            DataSourceId = step.Type == StepType.DataSource ? step.DataSourceId : Guid.Empty,
+            Rest = step.Type != StepType.Rest || step.Rest is null ? null : new RestStepConfig
+            {
+                Method = step.Rest.Method.Trim().ToUpperInvariant(),
+                Url = step.Rest.Url.Trim(),
+                Headers = step.Rest.Headers.Where(h => !string.IsNullOrWhiteSpace(h.Name)).Select(h => new NameValue { Name = h.Name.Trim(), Value = h.Value ?? "" }).ToList(),
+                Body = string.IsNullOrEmpty(step.Rest.Body) ? null : step.Rest.Body,
+                ContentType = Text(step.Rest.ContentType),
+                TimeoutSeconds = step.Rest.TimeoutSeconds,
+                Retries = step.Rest.Retries,
+            },
+            Email = step.Type != StepType.Email || step.Email is null ? null : new EmailStepConfig
+            {
+                To = step.Email.To.Trim(), Subject = step.Email.Subject.Trim(), Body = step.Email.Body, IsHtml = step.Email.IsHtml,
+            },
+            Page = step.Type != StepType.Page || step.Page is null ? null : new PageStepConfig { Html = step.Page.Html },
+            Module = step.Type != StepType.Module || step.Module is null ? null : new ModuleStepConfig
+            {
+                ModuleId = step.Module.ModuleId,
+                Parameters = step.Module.Parameters.Where(p => !string.IsNullOrWhiteSpace(p.Name)).Select(p => new NameValue { Name = p.Name.Trim(), Value = p.Value ?? "" }).ToList(),
+            },
+            Condition = step.Type != StepType.Condition || step.Condition is null ? null : new ConditionStepConfig
+            {
+                Left = step.Condition.Left.Trim(),
+                Operator = step.Condition.Operator,
+                Right = Text(step.Condition.Right),
+                OnTrue = Link(step.Condition.OnTrue),
+                OnFalse = Link(step.Condition.OnFalse),
+            },
+        };
     }
 
     private static async Task<Workflow?> ReadOneAsync(SqlConnection conn, SqlTransaction? tx, Guid id, CancellationToken ct)
@@ -359,11 +415,12 @@ VALUES (@id, @workflow, @parent, @data, @user, @now, @order)";
         WorkflowStatus status;
         DateTime created;
         DateTime? updated;
+        bool transaction;
 
         await using (var cmd = conn.CreateCommand())
         {
             cmd.Transaction = tx;
-            cmd.CommandText = "SELECT Code, Name, Description, Status, Created, Updated FROM rakit.Workflows WHERE Id = @id AND IsDeleted = 0";
+            cmd.CommandText = "SELECT Code, Name, Description, Status, Created, Updated, Property FROM rakit.Workflows WHERE Id = @id AND IsDeleted = 0";
             cmd.Parameters.Add(new SqlParameter("@id", SqlDbType.UniqueIdentifier) { Value = id });
             await using var reader = await cmd.ExecuteReaderAsync(ct);
             if (!await reader.ReadAsync(ct)) return null;
@@ -373,6 +430,7 @@ VALUES (@id, @workflow, @parent, @data, @user, @now, @order)";
             status = WorkflowJson.StatusFromColumn(reader.GetString(3));
             created = reader.GetDateTime(4);
             updated = reader.IsDBNull(5) ? null : reader.GetDateTime(5);
+            transaction = WorkflowJson.DeserializeSettings(reader.IsDBNull(6) ? null : reader.GetString(6)).Transaction;
         }
 
         var steps = new List<WorkflowStep>();
@@ -385,6 +443,6 @@ VALUES (@id, @workflow, @parent, @data, @user, @now, @order)";
             while (await reader.ReadAsync(ct)) steps.Add(WorkflowJson.DeserializeStep(reader.GetString(0)));
         }
 
-        return new Workflow(id, code, name, description, status, steps, created, updated);
+        return new Workflow(id, code, name, description, status, transaction, steps, created, updated);
     }
 }

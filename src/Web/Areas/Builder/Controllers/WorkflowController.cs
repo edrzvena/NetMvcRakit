@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Rakit.Core.DataSources;
+using Rakit.Core.Modules;
 using Rakit.Core.Workflows;
 using Rakit.Web.Areas.Builder.Models;
 
@@ -12,6 +13,7 @@ public class WorkflowController(
     IWorkflowRepository workflows,
     IWorkflowChecker checker,
     IDataSourceRepository dataSources,
+    IModuleRepository modules,
     ILogger<WorkflowController> logger) : Controller
 {
     private const string UnavailableView = "~/Areas/Builder/Views/Schema/Unavailable.cshtml";
@@ -33,7 +35,7 @@ public class WorkflowController(
         var workflow = await workflows.GetAsync(id, ct);
         if (workflow is null) return NotFound();
 
-        var problems = (await checker.CheckAsync(workflow.Steps, ct)).Where(i => i.IsError).Select(i => i.Message).ToList();
+        var problems = (await checker.CheckAsync(workflow.Steps, workflow.Transaction, ct)).Where(i => i.IsError).Select(i => i.Message).ToList();
         if (problems.Count > 0)
         {
             TempData["Error"] = $"Workflow '{workflow.Name}' belum bisa dipublikasikan: {string.Join(" ", problems)}";
@@ -135,6 +137,7 @@ public class WorkflowController(
         var model = new WorkflowFormViewModel
         {
             Id = workflow.Id, Code = workflow.Code, Name = workflow.Name, Description = workflow.Description, Status = workflow.Status,
+            Transaction = workflow.Transaction,
             StepsJson = WorkflowJson.SerializeSteps(workflow.Steps),
         };
         return View("Form", await WithLookupsAsync(model, ct));
@@ -174,6 +177,7 @@ public class WorkflowController(
         {
             // read with the same JSON rules the steps are stored with (string enums)
             List<WorkflowStep> steps;
+            var transaction = request.ValueKind == JsonValueKind.Object && request.TryGetProperty("transaction", out var flag) && flag.ValueKind == JsonValueKind.True;
             try
             {
                 steps = request.ValueKind == JsonValueKind.Object && request.TryGetProperty("steps", out var raw)
@@ -188,7 +192,7 @@ public class WorkflowController(
 
             var issues = WorkflowInputValidator.Validate(new WorkflowInput { Code = "check", Name = "check", Steps = steps })
                 .Select(e => new WorkflowIssue(true, e)).ToList();
-            issues.AddRange(await checker.CheckAsync(steps, ct));
+            issues.AddRange(await checker.CheckAsync(steps, transaction, ct));
             return Json(new { issues = issues.Select(i => new { isError = i.IsError, message = i.Message }) });
         }
         catch (SqlException ex)
@@ -211,6 +215,7 @@ public class WorkflowController(
                 Code = model.Code?.Trim() ?? "",
                 Name = model.Name?.Trim() ?? "",
                 Description = string.IsNullOrWhiteSpace(model.Description) ? null : model.Description.Trim(),
+                Transaction = model.Transaction,
                 Steps = WorkflowJson.DeserializeSteps(model.StepsJson),
             };
         }
@@ -243,6 +248,10 @@ public class WorkflowController(
             .OrderBy(d => d.Code)
             .Select(d => new StepSourceOption(d.Id,
                 $"{d.Code} - {d.Name} ({DataSourceDisplay.ModeLabel(d.Mode)}, {(d.StatementType == StatementType.Command ? "Command" : "Query")})"))
+            .ToList();
+
+        model.Modules = (await modules.ListAsync(ct: ct))
+            .Select(m => new StepSourceOption(m.Id, $"{m.Name} ({ModuleDisplayText.TypeLabel(m.Type)}{(m.Status == ModuleStatus.Published ? "" : ", draft")})"))
             .ToList();
 
         if (model.IsEdit && model.Id is { } id)

@@ -52,6 +52,7 @@
             button.disabled = false;
             if (res.ok) {
                 showMessage((res.data && res.data.message) || 'Aksi dijalankan.', true);
+                if (window.RakitActionResult) window.RakitActionResult.show(res.data && res.data.display);
                 await fresh();
             } else if (res.status === 400) {
                 rf.showErrors(res);

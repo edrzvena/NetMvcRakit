@@ -1,7 +1,22 @@
 namespace Rakit.Core.Sql;
 
+/// <summary>
+/// One execution connection with one open transaction, shared by several statements (a workflow run that wants all its
+/// database steps to commit or roll back together). Pass it in <see cref="SqlExecOptions.Scope"/>. The owner decides:
+/// <see cref="CommitAsync"/> or <see cref="RollbackAsync"/>; disposing a scope that was not completed rolls it back.
+/// </summary>
+public interface ISqlScope : IAsyncDisposable
+{
+    Task CommitAsync(CancellationToken ct = default);
+    Task RollbackAsync();
+}
+
 public interface ISqlExecutionService
 {
+    /// <summary>Opens an execution connection (login rakit_exec) and starts a transaction on it. The caller disposes the scope.</summary>
+    /// <exception cref="SqlExecutionException">The database could not be reached.</exception>
+    Task<ISqlScope> BeginScopeAsync(CancellationToken ct = default);
+
     /// <summary>
     /// Runs a parameterised query on the Execution connection (login rakit_exec). <c>{name}</c> placeholders and
     /// native <c>@name</c> tokens are bound from <paramref name="args"/> (case-insensitive keys, leading @ optional).

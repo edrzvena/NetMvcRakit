@@ -34,3 +34,159 @@ body {
 .form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
   text-align: start;
 }
+
+/* ---- Builder > Workflow: the canvas ---- */
+.wf-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 12px;
+  align-items: start;
+}
+
+@media (max-width: 991px) {
+  .wf-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.wf-canvas {
+  position: relative;
+  height: 560px;
+  overflow: auto;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.375rem;
+  background-color: #fafaf9;
+  background-image: radial-gradient(#d6d5d1 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.wf-edges {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.wf-edges .wf-edge {
+  fill: none;
+  stroke-width: 2;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.wf-edges .wf-edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.wf-edges .wf-edge.is-selected {
+  stroke-width: 4;
+}
+
+.wf-node {
+  position: absolute;
+  width: 176px;
+  height: 58px;
+  padding: 6px 10px;
+  border: 2px solid var(--bs-border-color);
+  border-radius: 0.5rem;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.wf-node.is-selected {
+  border-color: #2a78d6;
+  box-shadow: 0 0 0 3px rgba(42, 120, 214, 0.25);
+}
+
+.wf-node.is-dragging {
+  cursor: grabbing;
+}
+
+.wf-node .wf-kind {
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #52514e;
+}
+
+.wf-node .wf-title {
+  font-weight: 600;
+  font-size: 0.85rem;
+  line-height: 1.15;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.wf-node .wf-code {
+  position: absolute;
+  right: 8px;
+  top: 6px;
+  font-size: 0.68rem;
+  color: #6c757d;
+  max-width: 70px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wf-node.wf-type-dataSource { border-left: 6px solid #2a78d6; }
+.wf-node.wf-type-rest { border-left: 6px solid #6250d6; }
+.wf-node.wf-type-email { border-left: 6px solid #eb6834; }
+.wf-node.wf-type-condition { border-left: 6px solid #eda100; }
+.wf-node.wf-type-page { border-left: 6px solid #1baf7a; }
+.wf-node.wf-type-module { border-left: 6px solid #e87ba4; }
+.wf-node.wf-start { width: 96px; height: 40px; border-left: 2px solid #198754; background: #e9f6ef; text-align: center; padding-top: 8px; font-weight: 600; }
+
+.wf-port {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #6c757d;
+  border-radius: 50%;
+  background: #fff;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.wf-port:hover,
+.wf-port.is-target {
+  background: #2a78d6;
+  border-color: #2a78d6;
+}
+
+.wf-port.wf-in { left: -9px; top: 50%; margin-top: -7px; cursor: default; }
+.wf-port.wf-out { right: -9px; top: 50%; margin-top: -7px; }
+.wf-port.wf-yes { top: 30%; border-color: #198754; }
+.wf-port.wf-no { top: 72%; border-color: #dc3545; }
+.wf-port-label { position: absolute; right: 10px; font-size: 0.65rem; font-weight: 600; pointer-events: none; }
+.wf-port-label.wf-yes { top: 17%; color: #198754; }
+.wf-port-label.wf-no { top: 59%; color: #dc3545; }
+
+.wf-panel {
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.375rem;
+  padding: 12px;
+  max-height: 560px;
+  overflow: auto;
+  background: #fff;
+}
+
+/* the node layer must not swallow clicks meant for the edges below it; only the nodes themselves take pointer events */
+#wf-nodes {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+#wf-nodes .wf-node {
+  pointer-events: auto;
+}

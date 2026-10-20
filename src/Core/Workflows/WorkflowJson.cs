@@ -40,6 +40,7 @@ public static class WorkflowJson
     {
         TrackingStatus.Success => "success",
         TrackingStatus.Failed => "failed",
+        TrackingStatus.RolledBack => "rolledback",
         _ => "skipped",
     };
 
@@ -47,6 +48,18 @@ public static class WorkflowJson
     {
         "success" => TrackingStatus.Success,
         "failed" => TrackingStatus.Failed,
+        "rolledback" => TrackingStatus.RolledBack,
         _ => TrackingStatus.Skipped,
     };
+
+    /// <summary>The workflow-wide options stored in rakit.Workflows.Property.</summary>
+    public sealed class Settings
+    {
+        public bool Transaction { get; set; }
+    }
+
+    public static string SerializeSettings(Settings settings) => JsonSerializer.Serialize(settings, Options);
+
+    public static Settings DeserializeSettings(string? json)
+        => string.IsNullOrWhiteSpace(json) ? new Settings() : JsonSerializer.Deserialize<Settings>(json, Options) ?? new Settings();
 }

@@ -53,7 +53,10 @@ public sealed record ObjectWidgetData(object? Value, string? Text, string? Label
 public sealed record ObjectActionStep(string Code, string Name, string Status);
 
 /// <summary>A workflow button ran all its steps.</summary>
-public sealed record ObjectActionDone(string Message, IReadOnlyList<ObjectActionStep> Steps);
+/// <param name="Display">After the run: <c>kind</c> = <c>html</c> (show <c>html</c>, already sanitized) or <c>module</c> (go to <c>url</c>); null = nothing more to show.</param>
+public sealed record ObjectActionDone(string Message, IReadOnlyList<ObjectActionStep> Steps, ObjectActionDisplay? Display = null);
+
+public sealed record ObjectActionDisplay(string Kind, string? Html, string? Url);
 
 /// <summary>A write went through.</summary>
 public sealed record ObjectDone(string Message);

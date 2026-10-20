@@ -260,6 +260,7 @@
         if (button) button.disabled = false;
         if (res.ok) {
             showMessage((res.data && res.data.message) || 'Aksi dijalankan.', true);
+            if (window.RakitActionResult && window.RakitActionResult.show(res.data && res.data.display)) { /* a page or another module is shown */ }
             load(); // the workflow may have changed the data
         } else {
             showMessage(rf.failureText(res), false);

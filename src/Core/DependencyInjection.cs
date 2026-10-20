@@ -45,6 +45,17 @@ public static class DependencyInjection
         services.AddSingleton<IModuleRecordService, ModuleRecordService>();
         services.AddSingleton<IModuleLookupService, ModuleLookupService>();
         services.AddSingleton<IModuleVisualService, ModuleVisualService>();
+        services.Configure<WorkflowOptions>(configuration.GetSection(WorkflowOptions.SectionName));
+        services.Configure<MailOptions>(configuration.GetSection(MailOptions.SectionName));
+        // Rest steps: no redirects (a redirect could leave the allowed hosts), no cookies; the step's own timeout rules, not the client's
+        services.AddHttpClient(HttpRestCaller.ClientName, client => client.Timeout = Timeout.InfiniteTimeSpan)
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                AllowAutoRedirect = false, UseCookies = false, ConnectTimeout = TimeSpan.FromSeconds(10),
+            });
+        services.AddSingleton<IRestCaller, HttpRestCaller>();
+        services.AddSingleton<IWorkflowEmailSender, MailKitEmailSender>();
+        services.AddSingleton<IModuleLinkResolver, ModuleLinkResolver>();
         services.AddSingleton<IWorkflowRepository, WorkflowRepository>();
         services.AddSingleton<IWorkflowChecker, WorkflowChecker>();
         services.AddSingleton<IWorkflowRunner, WorkflowRunner>();

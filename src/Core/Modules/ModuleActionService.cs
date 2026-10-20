@@ -5,8 +5,9 @@ using Rakit.Core.Workflows;
 namespace Rakit.Core.Modules;
 
 /// <param name="Message">Safe to show to end users (success text, or why it failed).</param>
+/// <param name="Display">What the browser should show after a successful run (a page of HTML, or another module), or null.</param>
 public sealed record ModuleActionResult(
-    bool Success, WorkflowFailureKind Failure, string Message, IReadOnlyList<WorkflowStepResult> Steps);
+    bool Success, WorkflowFailureKind Failure, string Message, IReadOnlyList<WorkflowStepResult> Steps, WorkflowDisplay? Display = null);
 
 public interface IModuleActionService
 {
@@ -76,7 +77,7 @@ public sealed class ModuleActionService(
         }
 
         return run.Success
-            ? new ModuleActionResult(true, WorkflowFailureKind.None, $"Aksi '{action.Label.Trim()}' berhasil dijalankan.", run.Steps)
+            ? new ModuleActionResult(true, WorkflowFailureKind.None, $"Aksi '{action.Label.Trim()}' berhasil dijalankan.", run.Steps, run.Display)
             : new ModuleActionResult(false, run.Failure, run.Message, run.Steps);
     }
 }

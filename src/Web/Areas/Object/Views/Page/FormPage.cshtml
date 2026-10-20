@@ -45,8 +45,13 @@
 {
     <partial name="_LookupModal" />
 }
+@if (Model.Config.Actions.Count > 0)
+{
+    <partial name="_ActionResultModal" />
+}
 
 @section Scripts {
     <script src="~/js/record-form.js" asp-append-version="true"></script>
+    <script src="~/js/action-result.js" asp-append-version="true"></script>
     <script src="~/js/form-page.js" asp-append-version="true"></script>
 }

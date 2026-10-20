@@ -189,7 +189,8 @@ public class PageController(
         var result = await actions.RunAsync(moduleId, code, key, context.Form, context, ct);
         if (result.Success)
             return Json(new ObjectActionDone(result.Message,
-                result.Steps.Select(s => new ObjectActionStep(s.Code, s.Name, s.Status.ToString().ToLowerInvariant())).ToList()));
+                result.Steps.Select(s => new ObjectActionStep(s.Code, s.Name, s.Status.ToString().ToLowerInvariant())).ToList(),
+                result.Display is { } d ? new ObjectActionDisplay(d.Kind, d.Html, d.Url) : null));
 
         return Error(result.Failure switch
         {

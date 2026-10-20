@@ -18,6 +18,58 @@ public sealed class SqlExecutionService(
     private const int FirstUserErrorNumber = 50000;
     private const string ReturnValueParameter = "@RETURN_VALUE";
 
+    /// <summary>The scope's connection and transaction; the owner commits, rolls back and disposes them.</summary>
+    private sealed class SqlScope(SqlConnection connection, SqlTransaction transaction) : ISqlScope
+    {
+        private bool completed;
+
+        public SqlConnection Connection { get; } = connection;
+        public SqlTransaction Transaction { get; } = transaction;
+
+        public async Task CommitAsync(CancellationToken ct = default)
+        {
+            if (completed) throw new InvalidOperationException("The scope is already completed.");
+            completed = true;
+            await Transaction.CommitAsync(ct);
+        }
+
+        public async Task RollbackAsync()
+        {
+            if (completed) return;
+            completed = true;
+            await RollbackQuietlyAsync(Transaction);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await RollbackAsync();
+            await Transaction.DisposeAsync();
+            await Connection.DisposeAsync();
+        }
+    }
+
+    public async Task<ISqlScope> BeginScopeAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            var conn = await connections.CreateExecutionAsync(ct);
+            try
+            {
+                return new SqlScope(conn, (SqlTransaction)await conn.BeginTransactionAsync(ct));
+            }
+            catch
+            {
+                await conn.DisposeAsync();
+                throw;
+            }
+        }
+        catch (SqlException ex)
+        {
+            ct.ThrowIfCancellationRequested();
+            throw Translate(ex, DataSourceDefinition.DefaultTimeoutSeconds);
+        }
+    }
+
     public async Task<SqlExecResult> ExecuteQueryAsync(
         string sqlTemplate, IDictionary<string, object?> args, SqlExecOptions options, CancellationToken ct = default)
     {
@@ -35,8 +87,11 @@ public sealed class SqlExecutionService(
         var stopwatch = Stopwatch.StartNew();
         try
         {
-            await using var conn = await connections.CreateExecutionAsync(ct);
+            var scope = options.Scope as SqlScope;
+            await using var owned = scope is null ? await connections.CreateExecutionAsync(ct) : null;
+            var conn = scope?.Connection ?? owned!;
             await using var cmd = conn.CreateCommand();
+            cmd.Transaction = scope?.Transaction;
             cmd.CommandText = template.Sql;
             cmd.CommandTimeout = options.TimeoutSeconds;
 
@@ -70,7 +125,9 @@ public sealed class SqlExecutionService(
         var stopwatch = Stopwatch.StartNew();
         try
         {
-            await using var conn = await connections.CreateExecutionAsync(ct);
+            var scope = options.Scope as SqlScope;
+            await using var owned = scope is null ? await connections.CreateExecutionAsync(ct) : null;
+            var conn = scope?.Connection ?? owned!;
             await using var cmd = conn.CreateCommand();
             // Names come from the catalog (already validated against AllowedSchemas); the call is never built by EXEC.
             cmd.CommandText = $"[{schema.Trim().Replace("]", "]]")}].[{name.Trim().Replace("]", "]]")}]";
@@ -89,9 +146,10 @@ public sealed class SqlExecutionService(
                 if (bound.Direction != ParameterDirection.Input) outputs.Add(bound);
             }
 
-            await using var tx = options.RollbackAfter || options.CommitOnlyIfReturnValueZero
+            // With a scope the owner decides about the transaction; otherwise a preview / commit-if-zero call has its own.
+            await using var tx = scope is null && (options.RollbackAfter || options.CommitOnlyIfReturnValueZero)
                 ? (SqlTransaction)await conn.BeginTransactionAsync(ct) : null;
-            cmd.Transaction = tx;
+            cmd.Transaction = scope?.Transaction ?? tx;
 
             var read = await ReadResultSetsAsync(cmd, options.MaxRows, ct);
 

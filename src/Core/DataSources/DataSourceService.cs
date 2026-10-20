@@ -16,9 +16,10 @@ public sealed class DataSourceForbiddenException(string message) : Exception(mes
 /// <param name="IncludeTotal">Also compute the total row count (table mode, queries that use @IsCount, stored procedures with a count result set or @IsCount).</param>
 /// <param name="RequireQuery">The data source must be a Query statement, otherwise <see cref="DataSourceForbiddenException"/> (for callers that must never write, e.g. a lookup read on a GET).</param>
 /// <param name="CommitOnlyIfReturnValueZero">Stored procedures only: the call runs in a transaction that is committed only when the procedure returns 0; any other return value is rolled back and reported in <see cref="DataSourceResult.ReturnValue"/>.</param>
+/// <param name="Scope">Run on this shared connection and transaction (a workflow with one transaction); its owner commits or rolls back, so <paramref name="CommitOnlyIfReturnValueZero"/> does not apply.</param>
 public sealed record DataSourceRunRequest(
     int Skip = 0, int Take = 10, string? OrderBy = null, string? Search = null, bool IncludeTotal = true,
-    bool CommitOnlyIfReturnValueZero = false, bool RequireQuery = false);
+    bool CommitOnlyIfReturnValueZero = false, bool RequireQuery = false, Sql.ISqlScope? Scope = null);
 
 /// <param name="TotalCount">Total rows ignoring paging; null when it is unknown (query without @IsCount) or not requested.</param>
 public sealed record DataSourceResult(
@@ -183,6 +184,7 @@ public sealed class DataSourceService(
             MaxRows = maxRows ?? SqlExecOptions.DefaultMaxRows,
             RollbackAfter = rollback,
             CommitOnlyIfReturnValueZero = request.CommitOnlyIfReturnValueZero,
+            Scope = request.Scope,
         };
 
         return mode switch

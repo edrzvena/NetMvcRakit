@@ -26,6 +26,13 @@ public sealed record SqlExecOptions
     /// Ignored when <see cref="RollbackAfter"/> is set. Not honoured by <see cref="ISqlExecutionService.ExecuteQueryAsync"/>.
     /// </summary>
     public bool CommitOnlyIfReturnValueZero { get; init; }
+
+    /// <summary>
+    /// Run on this scope's connection and transaction instead of opening one. The scope's owner commits or rolls back, so
+    /// <see cref="RollbackAfter"/> and <see cref="CommitOnlyIfReturnValueZero"/> do not apply (a procedure's return value is
+    /// only reported).
+    /// </summary>
+    public ISqlScope? Scope { get; init; }
 }
 
 public sealed record DataTableResult(

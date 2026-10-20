@@ -125,7 +125,13 @@
     </div>
 }
 
+@if (hasActions)
+{
+    <partial name="_ActionResultModal" />
+}
+
 @section Scripts {
     <script src="~/js/record-form.js" asp-append-version="true"></script>
+    <script src="~/js/action-result.js" asp-append-version="true"></script>
     <script src="~/js/object-page.js" asp-append-version="true"></script>
 }

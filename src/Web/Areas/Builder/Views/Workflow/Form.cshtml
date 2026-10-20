@@ -4,6 +4,7 @@
 @{
     ViewData["Title"] = Model.IsEdit ? $"Ubah {Model.Name}" : "Workflow baru";
     var sources = JsonSerializer.Serialize(Model.DataSources.Select(s => new { id = s.Id, label = s.Label }));
+    var moduleOptions = JsonSerializer.Serialize(Model.Modules.Select(s => new { id = s.Id, label = s.Label }));
 }
 
 <p><a asp-area="Builder" asp-controller="Workflow" asp-action="Index">&larr; Workflow</a></p>
@@ -38,6 +39,17 @@
             <label class="form-label" for="Name">Nama</label>
             <input class="form-control" id="Name" name="Name" value="@Model.Name" maxlength="@WorkflowInputValidator.MaxNameLength" required />
         </div>
+        <div class="col-md-4">
+            <label class="form-label d-block">Transaksi</label>
+            <div class="form-check mt-2">
+                <input class="form-check-input" type="checkbox" id="Transaction" name="Transaction" value="true" checked="@Model.Transaction" />
+                <input type="hidden" name="Transaction" value="false" />
+                <label class="form-check-label" for="Transaction">Satu transaksi untuk semua langkah database</label>
+            </div>
+            <div class="form-text">
+                Bila salah satu langkah gagal, semua perubahan langkah data source dibatalkan (rollback). Langkah Rest dan Email tidak bisa dibatalkan.
+            </div>
+        </div>
     </div>
     <div class="mb-3">
         <label class="form-label" for="Description">Deskripsi</label>
@@ -45,29 +57,54 @@
     </div>
 
     <div class="border rounded p-3 mb-3">
-        <h2 class="h5">Langkah</h2>
+        <h2 class="h5">Alur</h2>
         <p class="small text-muted mb-2">
-            Dijalankan berurutan. Tiap langkah menjalankan satu data source (Query atau Command; tabel, query, atau stored procedure) dan
-            <strong>punya transaksinya sendiri</strong>: prosedur yang mengembalikan nilai selain 0 di-rollback. Bila satu langkah gagal, langkah
-            sesudahnya tidak dijalankan (dicatat sebagai dilewati). Nilai parameter diatur di <em>mapping parameter</em> data source-nya:
-            <code>FormField</code> = isian form pada tombol, <code>RouteValue</code> key <code>id</code> = kunci baris (tombol per baris),
-            <code>UserClaim</code>, <code>Constant</code>, dan <code>StepOutput</code> = hasil langkah sebelumnya.
+            Tambah langkah dari tombol di bawah, geser kotaknya, lalu sambungkan: tarik dari titik di <strong>sisi kanan</strong> sebuah langkah ke
+            <strong>sisi kiri</strong> langkah berikutnya (atau pilih "Berikutnya" di panel kanan). Langkah <em>Kondisi</em> punya dua keluaran:
+            <span class="text-success fw-semibold">Ya</span> dan <span class="text-danger fw-semibold">Tidak</span>; keluaran yang tidak disambung
+            mengakhiri workflow. Alur berjalan dari langkah yang disambung ke <strong>Mulai</strong>.
+            Klik sambungan lalu tekan <kbd>Delete</kbd> untuk melepasnya.
         </p>
-        <div class="alert alert-light border small" role="note">
-            Key <code>StepOutput</code> yang tersedia dari langkah berkode <code>kode</code>:
-            <code>kode.return</code> (nilai return prosedur), <code>kode.out.NamaParameter</code> (parameter OUTPUT, mis. <code>create.out.NewId</code>),
-            dan <code>kode.row.NamaKolom</code> (kolom pada baris pertama hasilnya).
-        </div>
-        <div id="steps" data-sources="@sources"></div>
-        <div class="mt-2">
-            <button type="button" class="btn btn-sm btn-outline-secondary" id="add-step">+ Langkah</button>
+
+        <div class="d-flex flex-wrap gap-1 align-items-center mb-2" id="wf-toolbar">
+            <span class="small text-muted me-1">Tambah:</span>
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-add="dataSource">Data source</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-add="rest">Rest</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-add="email">Email</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-add="condition">Kondisi</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-add="page">Halaman</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-add="module">Module</button>
+            <span class="mx-2 text-muted">|</span>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="wf-layout">Rapikan</button>
             <button type="button" class="btn btn-sm btn-outline-info" id="check-steps">Periksa</button>
             <span id="check-status" class="ms-2 small text-muted" aria-live="polite"></span>
         </div>
+
+        <div class="wf-layout" id="wf-root" data-sources="@sources" data-modules="@moduleOptions">
+            <div class="wf-canvas" id="wf-canvas" tabindex="0" aria-label="Kanvas alur workflow">
+                <svg id="wf-edges" class="wf-edges" aria-hidden="true">
+                    <defs>
+                        <marker id="wf-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill="#6c757d"></path>
+                        </marker>
+                        <marker id="wf-arrow-yes" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill="#198754"></path>
+                        </marker>
+                        <marker id="wf-arrow-no" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill="#dc3545"></path>
+                        </marker>
+                    </defs>
+                    <g id="wf-edge-layer"></g>
+                </svg>
+                <div id="wf-nodes"></div>
+            </div>
+            <div class="wf-panel" id="wf-panel" aria-live="polite"></div>
+        </div>
         <div id="check-result" class="mt-2" aria-live="polite"></div>
         <div class="form-text mt-2">
-            <em>Periksa</em> tidak menjalankan apa pun: ia memeriksa data source tiap langkah, urutan output antar-langkah, dan flag
-            (<code>AllowWrite</code>, <code>AllowRawQuery</code>, <code>AllowStoredProcedure</code>). Menjalankan sungguhan dilakukan dari tombol aksi di module.
+            <em>Periksa</em> tidak menjalankan apa pun: ia memeriksa data source, module, host Rest, urutan output antar-langkah, dan setelan
+            (<code>AllowWrite</code>, <code>AllowRawQuery</code>, <code>AllowStoredProcedure</code>, <code>Rakit:Workflow:AllowedHosts</code>, <code>Rakit:Mail</code>).
+            Menjalankan sungguhan dilakukan dari tombol aksi di module.
         </div>
     </div>
 
@@ -96,7 +133,7 @@
                                 <td><code>@(h.RunId.ToString()[..8])</code></td>
                                 <td>@(string.IsNullOrWhiteSpace(h.StepName) ? h.StepCode : h.StepName) <span class="text-muted">(@h.StepCode)</span></td>
                                 <td>
-                                    <span class="badge @(h.Status == TrackingStatus.Success ? "bg-success" : h.Status == TrackingStatus.Failed ? "bg-danger" : "bg-secondary")">@WorkflowDisplayText.TrackingLabel(h.Status)</span>
+                                    <span class="badge @(h.Status == TrackingStatus.Success ? "bg-success" : h.Status == TrackingStatus.Failed ? "bg-danger" : h.Status == TrackingStatus.RolledBack ? "bg-warning text-dark" : "bg-secondary")">@WorkflowDisplayText.TrackingLabel(h.Status)</span>
                                 </td>
                                 <td>@h.Message</td>
                                 <td class="text-end">@h.DurationMs</td>
