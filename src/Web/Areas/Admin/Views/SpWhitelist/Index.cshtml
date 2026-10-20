@@ -1,0 +1,95 @@
+@model SpWhitelistIndexViewModel
+@{
+    ViewData["Title"] = "SP Whitelist";
+}
+
+<h1 class="h3 mb-3">SP Whitelist</h1>
+
+<p class="text-muted">
+    Hanya stored procedure yang <strong>aktif</strong> di sini yang bisa dipilih, disimpan, di-preview, dan dijalankan oleh data source.
+    Daftar diambil dari schema yang diizinkan:
+    @foreach (var s in Model.AllowedSchemas)
+    {
+        <code class="me-1">@s</code>
+    }
+</p>
+
+<div class="alert alert-warning" role="note">
+    Hak <code>Admin.SpWhitelist</code> belum ditegakkan karena login belum ada: siapa pun yang bisa membuka halaman ini bisa mengubah whitelist (hanya untuk dev).
+</div>
+
+@if (!string.IsNullOrEmpty(Model.Message))
+{
+    <div class="alert alert-success" role="status">@Model.Message</div>
+}
+@if (!string.IsNullOrEmpty(Model.Error))
+{
+    <div class="alert alert-danger" role="alert">@Model.Error</div>
+}
+
+@if (Model.Rows.Count == 0)
+{
+    <p class="text-muted">Tidak ada stored procedure di schema yang diizinkan.</p>
+}
+else
+{
+    <table class="table table-sm table-hover align-middle">
+        <thead>
+            <tr><th>Prosedur</th><th>Status</th><th>Diubah</th><th></th></tr>
+        </thead>
+        <tbody>
+            @foreach (var r in Model.Rows)
+            {
+                <tr>
+                    <td>
+                        @if (r.Status == SpWhitelistStatus.Missing)
+                        {
+                            <code>@r.Schema.@r.Name</code>
+                        }
+                        else
+                        {
+                            <a asp-area="Builder" asp-controller="Schema" asp-action="Procedure" asp-route-schema="@r.Schema" asp-route-name="@r.Name"><code>@r.Schema.@r.Name</code></a>
+                        }
+                    </td>
+                    <td>
+                        @switch (r.Status)
+                        {
+                            case SpWhitelistStatus.Active:
+                                <span class="badge bg-success">Aktif</span>
+                                break;
+                            case SpWhitelistStatus.Inactive:
+                                <span class="badge bg-secondary">Nonaktif</span>
+                                break;
+                            case SpWhitelistStatus.NotListed:
+                                <span class="badge text-bg-light border">Belum didaftarkan</span>
+                                break;
+                            default:
+                                <span class="badge bg-warning text-dark">Tidak ditemukan</span>
+                                <small class="text-muted">@(r.IsActive ? "daftar masih aktif, tapi prosedurnya sudah tidak ada" : "daftar sudah nonaktif")</small>
+                                break;
+                        }
+                    </td>
+                    <td>@(r.Updated?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "-")</td>
+                    <td class="text-end text-nowrap">
+                        @if (r.CanToggle)
+                        {
+                            <form class="d-inline" method="post" asp-area="Admin" asp-controller="SpWhitelist" asp-action="SetActive">
+                                <input type="hidden" name="schemaName" value="@r.Schema" />
+                                <input type="hidden" name="name" value="@r.Name" />
+                                <input type="hidden" name="active" value="@(r.IsActive ? "false" : "true")" />
+                                @if (r.IsActive)
+                                {
+                                    <button type="submit" class="btn btn-sm btn-outline-danger">Nonaktifkan</button>
+                                }
+                                else
+                                {
+                                    <button type="submit" class="btn btn-sm btn-outline-success">Aktifkan</button>
+                                }
+                            </form>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}

@@ -65,8 +65,12 @@ WHERE SchemaName = @schema COLLATE Latin1_General_CI_AS
         var procedures = await schemaBrowser.GetProceduresAsync(ct);
         var procedure = procedures.FirstOrDefault(p =>
             string.Equals(p.Schema, schema, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase))
-            ?? throw new SchemaObjectNotFoundException("Object not found.");
+            && string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+
+        // Only an existing procedure can be activated or newly listed. An already listed row may still be deactivated
+        // after its procedure is gone; otherwise it would come back to life when a procedure of that name is recreated.
+        if (procedure is null && isActive)
+            throw new SchemaObjectNotFoundException("Object not found.");
 
         await using var conn = await connections.CreateMetadataAsync(ct);
         await using var cmd = conn.CreateCommand();
@@ -75,21 +79,23 @@ UPDATE rakit.SpWhitelist WITH (UPDLOCK, HOLDLOCK)
 SET IsActived = @active, UpdatedBy = @user, Updated = @now
 WHERE SchemaName = @schema COLLATE Latin1_General_CI_AS AND ProcName = @name COLLATE Latin1_General_CI_AS;
 
-IF @@ROWCOUNT = 0
+IF @@ROWCOUNT = 0 AND @exists = 1
     INSERT INTO rakit.SpWhitelist (Id, SchemaName, ProcName, IsActived, CreatedBy, Created)
     VALUES (NEWID(), @schema, @name, @active, @user, @now);
 
 SELECT Id, SchemaName, ProcName, IsActived, Created, Updated
 FROM rakit.SpWhitelist
 WHERE SchemaName = @schema COLLATE Latin1_General_CI_AS AND ProcName = @name COLLATE Latin1_General_CI_AS;";
-        cmd.Parameters.Add(new SqlParameter("@schema", SqlDbType.NVarChar, MaxIdentifierLength) { Value = procedure.Schema });
-        cmd.Parameters.Add(new SqlParameter("@name", SqlDbType.NVarChar, MaxIdentifierLength) { Value = procedure.Name });
+        cmd.Parameters.Add(new SqlParameter("@schema", SqlDbType.NVarChar, MaxIdentifierLength) { Value = procedure?.Schema ?? schema });
+        cmd.Parameters.Add(new SqlParameter("@name", SqlDbType.NVarChar, MaxIdentifierLength) { Value = procedure?.Name ?? name });
+        cmd.Parameters.Add(new SqlParameter("@exists", SqlDbType.Bit) { Value = procedure is not null });
         cmd.Parameters.Add(new SqlParameter("@active", SqlDbType.Bit) { Value = isActive });
         cmd.Parameters.Add(new SqlParameter("@user", SqlDbType.NVarChar, -1) { Value = user ?? "" });
         cmd.Parameters.Add(new SqlParameter("@now", SqlDbType.DateTime2) { Value = DateTime.UtcNow });
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
-        await reader.ReadAsync(ct);
+        if (!await reader.ReadAsync(ct))
+            throw new SchemaObjectNotFoundException("Object not found.");
         return Read(reader);
     }
 

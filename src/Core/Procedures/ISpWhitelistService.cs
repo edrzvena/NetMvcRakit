@@ -15,10 +15,10 @@ public interface ISpWhitelistService
 
     /// <summary>
     /// Activates or deactivates a procedure, adding it to the whitelist if it is not listed yet. The stored spelling
-    /// is the catalog's.
+    /// is the catalog's. A listed row whose procedure no longer exists can still be deactivated (not activated).
     /// </summary>
     /// <exception cref="ArgumentException">schema or name is null/blank.</exception>
     /// <exception cref="SchemaAccessDeniedException">schema is not in AllowedSchemas.</exception>
-    /// <exception cref="SchemaObjectNotFoundException">no such procedure, or a system procedure (sp_*, xp_*).</exception>
+    /// <exception cref="SchemaObjectNotFoundException">no such procedure (and, for a deactivation, no such row either), or a system procedure (sp_*, xp_*).</exception>
     Task<SpWhitelistEntry> SetActiveAsync(string schema, string name, bool isActive, string user, CancellationToken ct = default);
 }
