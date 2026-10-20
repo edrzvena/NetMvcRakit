@@ -409,31 +409,85 @@
         return el('pre', { class: 'pg-messages mb-0' }, [document.createTextNode(messages.map((m) => m.text).join('\n'))]);
     }
 
+    // Every result set is shown as JSON first (an array of objects, one per row) and as a table on request.
+    const NUMERIC_TYPES = new Set(['tinyint', 'smallint', 'int', 'bigint', 'decimal', 'numeric', 'float', 'real', 'money', 'smallmoney']);
+
+    /** The cell as a JSON literal: numbers and bits by their column type, null as null, everything else as a string. */
+    function jsonLiteral(type, value) {
+        if (value === null) return 'null';
+        const base = String(type || '').split('(')[0].trim().toLowerCase();
+        if (base === 'bit' && (value === 'true' || value === 'false')) return value;
+        if (NUMERIC_TYPES.has(base) && /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(value)) return value;
+        return JSON.stringify(value);
+    }
+
+    function toJsonText(set) {
+        if (set.rows.length === 0) return '[]';
+        const seen = new Map();
+        const keys = set.columns.map((c, i) => {
+            const name = c.name || '(kolom ' + (i + 1) + ')';
+            const count = (seen.get(name) || 0) + 1;
+            seen.set(name, count);
+            return count > 1 ? name + '_' + count : name; // a repeated column name would overwrite the first one
+        });
+        const rows = set.rows.map((row) => '  {\n' + row.map((v, i) => '    ' + JSON.stringify(keys[i]) + ': ' + jsonLiteral(set.columns[i].type, v)).join(',\n') + '\n  }');
+        return '[\n' + rows.join(',\n') + '\n]';
+    }
+
     function renderGrid(set) {
         const head = el('tr', {}, [el('th', { class: 'pg-rownum', text: '#' })].concat(
             set.columns.map((c, i) => el('th', { text: c.name || '(kolom ' + (i + 1) + ')', title: c.type }))));
         const body = set.rows.map((row, r) => el('tr', {}, [el('td', { class: 'pg-rownum text-muted', text: r + 1 })].concat(
             row.map((v) => (v === null ? nullCell() : el('td', { text: v }))))));
 
+        const json = toJsonText(set);
+        let mode = 'json';
+
         const tools = el('div', { class: 'd-flex flex-wrap align-items-center gap-2 mb-1 small' });
         tools.appendChild(el('span', { class: 'text-muted', text: set.truncated
             ? 'Menampilkan ' + number(set.rows.length) + ' dari ' + number(set.totalRows) + ' baris'
             : number(set.rows.length) + ' baris' }));
         if (set.truncated) tools.appendChild(el('span', { class: 'badge text-bg-warning', text: 'dipotong' }));
-        const copy = el('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary py-0 ms-auto' }, [icon('bi-clipboard'), ' Salin']);
-        copy.addEventListener('click', async () => {
-            try { await navigator.clipboard.writeText(toDelimited(set, '\t')); copy.replaceChildren(icon('bi-clipboard-check'), ' Tersalin'); } catch (e) { copy.textContent = 'Gagal'; }
-            setTimeout(() => copy.replaceChildren(icon('bi-clipboard'), ' Salin'), 1200);
-        });
-        const csv = el('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary py-0' }, [icon('bi-download'), ' CSV']);
-        csv.addEventListener('click', () => download('hasil.csv', toDelimited(set, ',', true), 'text/csv'));
-        tools.append(copy, csv);
 
-        const wrap = el('div', { class: 'pg-grid' }, [
+        const jsonButton = el('button', { type: 'button', class: 'btn btn-sm btn-primary py-0', 'aria-pressed': 'true', text: 'JSON' });
+        const tableButton = el('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary py-0', 'aria-pressed': 'false', text: 'Tabel' });
+        const toggle = el('div', { class: 'btn-group btn-group-sm ms-2', role: 'group', 'aria-label': 'Tampilan hasil' }, [jsonButton, tableButton]);
+
+        const copy = el('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary py-0 ms-auto' }, [icon('bi-clipboard'), ' Salin']);
+        const download = el('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary py-0' }, [icon('bi-download'), ' .json']);
+        tools.append(toggle, copy, download);
+
+        const jsonView = el('pre', { class: 'pg-json mb-0', tabindex: '0', 'aria-label': 'Hasil dalam JSON' }, [document.createTextNode(json)]);
+        const wrap = el('div', { class: 'pg-grid d-none' }, [
             el('table', { class: 'table table-sm table-bordered table-hover mb-0' }, [el('thead', {}, [head]), el('tbody', {}, body)]),
         ]);
         if (set.rows.length === 0) wrap.appendChild(el('div', { class: 'text-muted small p-2', text: 'Tidak ada baris.' }));
-        return el('div', {}, [tools, wrap]);
+
+        function show(next) {
+            mode = next;
+            const asJson = mode === 'json';
+            jsonView.classList.toggle('d-none', !asJson);
+            wrap.classList.toggle('d-none', asJson);
+            jsonButton.className = 'btn btn-sm py-0 ' + (asJson ? 'btn-primary' : 'btn-outline-secondary');
+            tableButton.className = 'btn btn-sm py-0 ' + (asJson ? 'btn-outline-secondary' : 'btn-primary');
+            jsonButton.setAttribute('aria-pressed', asJson ? 'true' : 'false');
+            tableButton.setAttribute('aria-pressed', asJson ? 'false' : 'true');
+            download.replaceChildren(icon('bi-download'), asJson ? ' .json' : ' .csv');
+        }
+        jsonButton.addEventListener('click', () => show('json'));
+        tableButton.addEventListener('click', () => show('table'));
+
+        // Salin and the download follow the view that is showing: JSON as it is, the table as tab-separated text / CSV
+        copy.addEventListener('click', async () => {
+            try { await navigator.clipboard.writeText(mode === 'json' ? json : toDelimited(set, '\t')); copy.replaceChildren(icon('bi-clipboard-check'), ' Tersalin'); } catch (e) { copy.textContent = 'Gagal'; }
+            setTimeout(() => copy.replaceChildren(icon('bi-clipboard'), ' Salin'), 1200);
+        });
+        download.addEventListener('click', () => {
+            if (mode === 'json') download_('hasil.json', json, 'application/json');
+            else download_('hasil.csv', toDelimited(set, ',', true), 'text/csv');
+        });
+
+        return el('div', {}, [tools, jsonView, wrap]);
     }
 
     function toDelimited(set, sep, quote) {
@@ -447,8 +501,8 @@
         return lines.join('\r\n');
     }
 
-    function download(name, text, type) {
-        const url = URL.createObjectURL(new Blob(['﻿' + text], { type: type + ';charset=utf-8' }));
+    function download_(name, text, type) {
+        const url = URL.createObjectURL(new Blob([(type === 'text/csv' ? '﻿' : '') + text], { type: type + ';charset=utf-8' }));
         const link = el('a', { href: url, download: name });
         document.body.appendChild(link);
         link.click();

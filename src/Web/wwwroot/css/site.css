@@ -1641,3 +1641,17 @@ a.rk-stat:hover {
 .pg-ctx.show {
   display: block;
 }
+
+/* Playground: a result set shown as JSON */
+.pg-json {
+  max-height: 440px;
+  padding: 0.6rem 0.8rem;
+  overflow: auto;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--rk-text);
+  white-space: pre;
+  background: var(--rk-surface-2);
+  border: 1px solid var(--rk-border);
+  border-radius: var(--rk-radius-sm);
+}
