@@ -123,6 +123,41 @@
     }
     typeInput.addEventListener('change', applyType);
 
+    // ---- Page / Html: character counter, "Sisipkan module" and the sanitized preview ----
+    const pageHtml = $('PageHtml');
+    if (pageHtml) {
+        const count = () => { $('page-html-count').textContent = String(pageHtml.value.length); };
+        pageHtml.addEventListener('input', count);
+        count();
+
+        $('embed-insert').addEventListener('click', () => {
+            const id = $('embed-module').value;
+            if (!id) return;
+            const marker = '\n{{module:' + id + '}}\n';
+            const at = pageHtml.selectionEnd != null ? pageHtml.selectionEnd : pageHtml.value.length;
+            pageHtml.value = pageHtml.value.slice(0, at) + marker + pageHtml.value.slice(at);
+            pageHtml.focus();
+            pageHtml.selectionStart = pageHtml.selectionEnd = at + marker.length;
+            count();
+        });
+
+        $('page-preview-run').addEventListener('click', async () => {
+            const status = $('page-preview-status');
+            const frame = $('page-preview-frame');
+            status.textContent = 'menjalankan...';
+            const res = await postJson('/Builder/Module/PreviewHtml', { html: pageHtml.value });
+            if (!res.ok || !res.data) {
+                frame.classList.add('d-none');
+                status.replaceChildren(errorBox(res, 'Preview gagal.'));
+                return;
+            }
+            status.textContent = res.data.changed ? 'Sebagian HTML dibuang oleh sanitasi (yang tersimpan nanti adalah hasil ini).' : 'HTML tidak berubah oleh sanitasi.';
+            frame.srcdoc = '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/lib/bootstrap/dist/css/bootstrap.min.css"></head><body class="p-3">'
+                + res.data.html + '</body></html>';
+            frame.classList.remove('d-none');
+        });
+    }
+
     // ---- form fields editor ----
     function renderFields() {
         const host = $('fields');

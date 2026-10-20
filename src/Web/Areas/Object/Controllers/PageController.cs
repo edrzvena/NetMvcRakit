@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Text.Encodings.Web;
+using Microsoft.AspNetCore.Html;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
@@ -34,12 +36,14 @@ public class PageController(
         {
             var module = await runtime.GetModuleAsync(moduleId, allowDraft: false, ct);
             ViewData["WriteEnabled"] = dbOptions.Value.AllowWrite;
-            return module.Type switch
+            if (module.Type == ModuleType.Page)
             {
-                ModuleType.Table => View(module),
-                ModuleType.Form => View("FormPage", module),
-                _ => NotFound(), // Page modules get their own view with the Page task
-            };
+                // Sanitized again on every render; a page that is itself embedded (?embed=1) does not embed further, so there are no loops.
+                var embedded = Request.Query["embed"] == "1";
+                ViewData["PageHtml"] = new HtmlString(ModulePageHtml.Render(module.Config.Page?.Html, EmbedMarkup, drop: embedded));
+                return View("HtmlPage", module);
+            }
+            return module.Type == ModuleType.Table ? View(module) : View("FormPage", module);
         }
         catch (ModuleNotFoundException)
         {
@@ -51,6 +55,14 @@ public class PageController(
             Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
             return View(UnavailableView);
         }
+    }
+
+    /// <summary>The iframe that shows another module inside a Page module; its height follows the content (page-embed.js).</summary>
+    private string EmbedMarkup(Guid moduleId)
+    {
+        var url = Url.Action("Index", "Page", new { area = "Object", moduleId, embed = 1 }) ?? "";
+        return "<div class=\"mb-3\"><iframe data-rakit-embed class=\"w-100 border-0\" style=\"height: 320px\" loading=\"lazy\" title=\"Module tersemat\" src=\""
+            + HtmlEncoder.Default.Encode(url) + "\"></iframe></div>";
     }
 
     [HttpGet("{moduleId:guid}/data")]

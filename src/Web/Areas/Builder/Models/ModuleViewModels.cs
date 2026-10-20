@@ -29,6 +29,12 @@ public sealed class ModuleFormViewModel
 
     public Guid? DataSourceId { get; set; }
 
+    /// <summary>Page modules: the HTML (sanitized when saved). <c>{{module:GUID}}</c> embeds a Table or Form module.</summary>
+    public string? PageHtml { get; set; }
+
+    /// <summary>Table and Form modules a Page may embed, for the "Sisipkan module" helper.</summary>
+    public IReadOnlyList<ModuleSummary> EmbeddableModules { get; set; } = [];
+
     /// <summary>Optional record actions: Detail is a Query data source, the other three are Command data sources.</summary>
     public Guid? DetailDataSourceId { get; set; }
     public Guid? InsertDataSourceId { get; set; }
@@ -52,6 +58,11 @@ public sealed class ModuleFormViewModel
     public bool DataSourceUnavailable { get; set; }
 
     public bool IsEdit => Id is not null;
+}
+
+public sealed class PageHtmlPreviewRequest
+{
+    public string? Html { get; set; }
 }
 
 public sealed class ModuleLoadColumnsRequest

@@ -27,6 +27,11 @@ public class ModuleController(
 
     private string CurrentUser => User.Identity?.Name ?? "anonymous";
 
+    /// <summary>Remarks to show with the success message (e.g. an embedded module that is still a draft).</summary>
+    private readonly List<string> notes = [];
+
+    private string WithNotes(string message) => notes.Count == 0 ? message : message + " " + string.Join(" ", notes);
+
     // ---- list ----------------------------------------------------------------------------------
 
     public Task<IActionResult> Index(CancellationToken ct) => GuardAsync(async () =>
@@ -131,7 +136,7 @@ public class ModuleController(
             try
             {
                 var created = await modules.CreateAsync(input, CurrentUser, ct);
-                TempData["Message"] = $"Module '{created.Name}' dibuat sebagai draft.";
+                TempData["Message"] = WithNotes($"Module '{created.Name}' dibuat sebagai draft.");
                 return RedirectToAction(nameof(Index));
             }
             catch (Exception ex) when (AddModelErrors(ex)) { }
@@ -150,6 +155,7 @@ public class ModuleController(
         {
             Id = module.Id, Name = module.Name, Type = module.Type, Description = module.Description, GroupId = module.GroupId,
             DataSourceId = module.Config.Source.List?.DataSourceId, Status = module.Status,
+            PageHtml = module.Config.Page?.Html,
             DetailDataSourceId = module.Config.Source.Detail?.DataSourceId,
             InsertDataSourceId = module.Config.Source.Insert?.DataSourceId,
             UpdateDataSourceId = module.Config.Source.Update?.DataSourceId,
@@ -172,7 +178,7 @@ public class ModuleController(
             try
             {
                 var updated = await modules.UpdateAsync(id, input, CurrentUser, ct);
-                TempData["Message"] = $"Module '{updated.Name}' disimpan.";
+                TempData["Message"] = WithNotes($"Module '{updated.Name}' disimpan.");
                 return RedirectToAction(nameof(Index));
             }
             catch (ModuleNotFoundException)
@@ -240,6 +246,28 @@ public class ModuleController(
             result.TotalCount, result.Skip, result.Take, result.HasNext, result.OrderBy));
     });
 
+    /// <summary>
+    /// Page module preview: the HTML as it will be stored (sanitized) with each embedded module shown as a labelled box
+    /// (name, type, status). The browser shows it inside a sandboxed iframe without scripts.
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    public Task<IActionResult> PreviewHtml([FromBody] PageHtmlPreviewRequest request, CancellationToken ct) => BuilderJsonAsync(async () =>
+    {
+        var raw = request.Html ?? "";
+        if (raw.Length > ModulePage.MaxHtmlLength) return JsonError(400, $"Isi HTML maksimal {ModulePage.MaxHtmlLength} karakter.");
+
+        var boxes = new Dictionary<Guid, string>();
+        foreach (var id in ModulePageHtml.EmbeddedModuleIds(raw).Take(ModulePageHtml.MaxEmbeds))
+        {
+            var target = await modules.GetAsync(id, ct);
+            var text = target is null ? $"Module tidak ditemukan: {id}"
+                : $"Module tersemat: {target.Name} ({ModuleDisplayText.TypeLabel(target.Type)}, {ModuleDisplayText.StatusLabel(target.Status)})";
+            boxes[id] = "<div class=\"border rounded p-2 mb-3 bg-light text-muted small\">" + System.Net.WebUtility.HtmlEncode(text) + "</div>";
+        }
+        var html = ModulePageHtml.Render(raw, id => boxes.GetValueOrDefault(id, ""));
+        return Json(new { html, changed = ModulePageHtml.Sanitize(raw).Trim() != raw.Trim() });
+    });
+
     // ---- internals -----------------------------------------------------------------------------
 
     /// <summary>Turns "id=2&amp;q=abc" into the query-string part of a parameter context.</summary>
@@ -274,16 +302,26 @@ public class ModuleController(
 
         // Every data source comes from the selects (never from ConfigJson); Display, Form and Access come from ConfigJson.
         // A Form module only inserts, so only the Insert select counts for it.
-        config.Source = model.Type == ModuleType.Form
-            ? new ModuleSource { Insert = Ref(model.InsertDataSourceId) }
-            : new ModuleSource
+        // A Page module has no data sources, form or display: only its HTML.
+        config.Source = model.Type switch
+        {
+            ModuleType.Form => new ModuleSource { Insert = Ref(model.InsertDataSourceId) },
+            ModuleType.Page => new ModuleSource(),
+            _ => new ModuleSource
             {
                 List = Ref(model.DataSourceId),
                 Detail = Ref(model.DetailDataSourceId),
                 Insert = Ref(model.InsertDataSourceId),
                 Update = Ref(model.UpdateDataSourceId),
                 Delete = Ref(model.DeleteDataSourceId),
-            };
+            },
+        };
+        if (model.Type == ModuleType.Page)
+        {
+            config.Page = new ModulePage { Html = model.PageHtml ?? "" };
+            config.Form = new ModuleForm();
+            config.Display = new ModuleDisplay();
+        }
         var input = new ModuleInput
         {
             Name = model.Name?.Trim() ?? "",
@@ -307,6 +345,21 @@ public class ModuleController(
         foreach (var e in recordProblems) ModelState.AddModelError("", e);
         if (recordProblems.Count > 0) return null;
 
+        if (model.Type == ModuleType.Page)
+        {
+            // What is stored is the sanitized HTML; the embedded modules are checked against the database.
+            var embedProblems = await EmbedProblemsAsync(config.Page!.Html, model.Id, ct);
+            foreach (var e in embedProblems) ModelState.AddModelError("", e);
+            if (embedProblems.Count > 0) return null;
+
+            config.Page.Html = ModulePageHtml.Sanitize(config.Page.Html);
+            if (string.IsNullOrWhiteSpace(config.Page.Html))
+            {
+                ModelState.AddModelError("", "Isi HTML kosong setelah disanitasi: hanya markup yang tidak aman.");
+                return null;
+            }
+        }
+
         if (!string.IsNullOrWhiteSpace(model.NewGroupName))
         {
             try
@@ -328,6 +381,28 @@ public class ModuleController(
         }
 
         return input;
+    }
+
+    /// <summary>
+    /// Errors for the modules a Page embeds: at most <see cref="ModulePageHtml.MaxEmbeds"/>, each must exist, not be the page
+    /// itself and not be a Page (no nesting). A Draft target is allowed (it shows nothing until published) and is only noted.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> EmbedProblemsAsync(string html, Guid? selfId, CancellationToken ct)
+    {
+        var ids = ModulePageHtml.EmbeddedModuleIds(html);
+        var errors = new List<string>();
+        if (ids.Count > ModulePageHtml.MaxEmbeds)
+            errors.Add($"Satu halaman maksimal menyematkan {ModulePageHtml.MaxEmbeds} module.");
+
+        foreach (var id in ids.Take(ModulePageHtml.MaxEmbeds))
+        {
+            if (id == selfId) { errors.Add("Halaman tidak bisa menyematkan dirinya sendiri."); continue; }
+            var target = await modules.GetAsync(id, ct);
+            if (target is null) errors.Add($"Module yang disematkan tidak ditemukan: {id}.");
+            else if (target.Type == ModuleType.Page) errors.Add($"Module '{target.Name}' bertipe Page; hanya module Table atau Form yang bisa disematkan.");
+            else if (target.Status != ModuleStatus.Published) notes.Add($"Catatan: module '{target.Name}' yang disematkan masih Draft, tampil kosong sampai dipublikasikan.");
+        }
+        return errors;
     }
 
     private static DataSourceRef? Ref(Guid? id) => id is { } value ? new DataSourceRef { DataSourceId = value } : null;
@@ -391,6 +466,7 @@ public class ModuleController(
             .Select(d => new DataSourceOption(d.Id, d.Code, d.Name, ModuleDisplayText.ModeLabel(d.Mode)))
             .ToList();
         model.WriteEnabled = dbOptions.Value.AllowWrite;
+        model.EmbeddableModules = (await modules.ListAsync(ct: ct)).Where(m => m.Type is ModuleType.Table or ModuleType.Form).ToList();
 
         if (model.IsEdit && model.Id is { } moduleId)
             model.Status = (await modules.GetAsync(moduleId, ct))?.Status ?? model.Status;

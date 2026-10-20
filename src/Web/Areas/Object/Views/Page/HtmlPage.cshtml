@@ -1,0 +1,19 @@
+@model Rakit.Core.Modules.Module
+@{
+    ViewData["Title"] = Model.Name;
+    // Already sanitized by the controller (ModulePageHtml.Render); the only markup the server adds is the embed iframes.
+    var html = ViewData["PageHtml"] as Microsoft.AspNetCore.Html.IHtmlContent;
+}
+
+@if (!string.IsNullOrWhiteSpace(Model.Description))
+{
+    <p class="text-muted">@Model.Description</p>
+}
+
+<div id="html-page">
+    @html
+</div>
+
+@section Scripts {
+    <script src="~/js/page-embed.js" asp-append-version="true"></script>
+}

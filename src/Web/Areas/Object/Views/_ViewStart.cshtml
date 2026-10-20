@@ -1,3 +1,4 @@
 @{
-    Layout = "~/Views/Shared/_Layout.cshtml";
+    // ?embed=1: the page is shown inside a Page module's iframe, so it gets the bare layout (no navbar, no footer).
+    Layout = Context.Request.Query["embed"] == "1" ? "~/Views/Shared/_LayoutEmbed.cshtml" : "~/Views/Shared/_Layout.cshtml";
 }
