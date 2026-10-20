@@ -23,8 +23,7 @@ public class SpWhitelistController(
     {
         try
         {
-            // Configuration binding appends appsettings entries to the option's default array, so "app" can appear twice.
-            var allowed = options.Value.AllowedSchemas.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var allowed = options.Value.AllowedSchemas;
             var rows = Merge(await schema.GetProceduresAsync(ct), await whitelist.ListAsync(ct), allowed);
             return View(new SpWhitelistIndexViewModel(rows, allowed, TempData["Message"] as string, TempData["Error"] as string));
         }
