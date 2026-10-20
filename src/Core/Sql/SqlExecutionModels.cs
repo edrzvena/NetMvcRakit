@@ -19,6 +19,13 @@ public sealed record SqlExecOptions
     /// writes leaves nothing behind. Not honoured by <see cref="ISqlExecutionService.ExecuteQueryAsync"/>.
     /// </summary>
     public bool RollbackAfter { get; init; }
+
+    /// <summary>
+    /// Procedures only: run inside a transaction that is committed only when the procedure finishes without error and
+    /// returns 0 (the convention: 0 = success, anything else = a business error code); any other return value rolls it back.
+    /// Ignored when <see cref="RollbackAfter"/> is set. Not honoured by <see cref="ISqlExecutionService.ExecuteQueryAsync"/>.
+    /// </summary>
+    public bool CommitOnlyIfReturnValueZero { get; init; }
 }
 
 public sealed record DataTableResult(

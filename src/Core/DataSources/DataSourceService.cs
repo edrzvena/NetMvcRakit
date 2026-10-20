@@ -14,8 +14,10 @@ public sealed class DataSourceForbiddenException(string message) : Exception(mes
 /// <param name="OrderBy">Optional <c>column_asc</c> / <c>column_desc</c>.</param>
 /// <param name="Search">Optional free-text search.</param>
 /// <param name="IncludeTotal">Also compute the total row count (table mode, queries that use @IsCount, stored procedures with a count result set or @IsCount).</param>
+/// <param name="CommitOnlyIfReturnValueZero">Stored procedures only: the call runs in a transaction that is committed only when the procedure returns 0; any other return value is rolled back and reported in <see cref="DataSourceResult.ReturnValue"/>.</param>
 public sealed record DataSourceRunRequest(
-    int Skip = 0, int Take = 10, string? OrderBy = null, string? Search = null, bool IncludeTotal = true);
+    int Skip = 0, int Take = 10, string? OrderBy = null, string? Search = null, bool IncludeTotal = true,
+    bool CommitOnlyIfReturnValueZero = false);
 
 /// <param name="TotalCount">Total rows ignoring paging; null when it is unknown (query without @IsCount) or not requested.</param>
 public sealed record DataSourceResult(
@@ -177,6 +179,7 @@ public sealed class DataSourceService(
             StatementType = statement,
             MaxRows = maxRows ?? SqlExecOptions.DefaultMaxRows,
             RollbackAfter = rollback,
+            CommitOnlyIfReturnValueZero = request.CommitOnlyIfReturnValueZero,
         };
 
         return mode switch

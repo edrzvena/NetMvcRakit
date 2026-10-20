@@ -89,7 +89,8 @@ public sealed class SqlExecutionService(
                 if (bound.Direction != ParameterDirection.Input) outputs.Add(bound);
             }
 
-            await using var tx = options.RollbackAfter ? (SqlTransaction)await conn.BeginTransactionAsync(ct) : null;
+            await using var tx = options.RollbackAfter || options.CommitOnlyIfReturnValueZero
+                ? (SqlTransaction)await conn.BeginTransactionAsync(ct) : null;
             cmd.Transaction = tx;
 
             var read = await ReadResultSetsAsync(cmd, options.MaxRows, ct);
@@ -101,7 +102,12 @@ public sealed class SqlExecutionService(
                     read.Truncated || output.Value is DBNull or null ? null : output.Value;
             int? returned = read.Truncated || returnValue.Value is DBNull or null ? null : Convert.ToInt32(returnValue.Value, CultureInfo.InvariantCulture);
 
-            if (tx is not null) await RollbackQuietlyAsync(tx);
+            if (tx is not null)
+            {
+                // A cut-short read (return value unknown) is never committed.
+                if (!options.RollbackAfter && returned == 0) await tx.CommitAsync(ct);
+                else await RollbackQuietlyAsync(tx);
+            }
 
             return new SqlExecResult(read.ResultSets, outputValues, returned, Math.Max(read.RecordsAffected, 0), stopwatch.Elapsed);
         }
