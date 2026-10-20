@@ -9,12 +9,17 @@ public sealed class DbConnectionFactory(IOptions<RakitDbOptions> options) : IDbC
     // Constants on purpose: these are never built from input.
     private const string MetadataUser = "rakit_app";
     private const string ExecutionUser = "rakit_exec";
+    private const string PlaygroundReadUser = "rakit_play_ro";
+    private const string PlaygroundWriteUser = "rakit_play";
 
     public Task<SqlConnection> CreateMetadataAsync(CancellationToken ct = default)
         => OpenAsImpersonatedAsync(options.Value.MetadataConnectionString, MetadataUser, ct);
 
     public Task<SqlConnection> CreateExecutionAsync(CancellationToken ct = default)
         => OpenAsImpersonatedAsync(options.Value.ExecutionConnectionString, ExecutionUser, ct);
+
+    public Task<SqlConnection> CreatePlaygroundAsync(bool write, CancellationToken ct = default)
+        => OpenAsImpersonatedAsync(options.Value.ExecutionConnectionString, write ? PlaygroundWriteUser : PlaygroundReadUser, ct);
 
     private static async Task<SqlConnection> OpenAsImpersonatedAsync(string connectionString, string user, CancellationToken ct)
     {

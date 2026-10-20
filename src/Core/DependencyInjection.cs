@@ -6,6 +6,7 @@ using Rakit.Core.Data;
 using Rakit.Core.DataSources;
 using Rakit.Core.Health;
 using Rakit.Core.Modules;
+using Rakit.Core.Playground;
 using Rakit.Core.Procedures;
 using Rakit.Core.Schema;
 using Rakit.Core.Sql;
@@ -28,9 +29,20 @@ public static class DependencyInjection
 
         services.AddSingleton<IValidateOptions<RakitDbOptions>, RakitDbOptionsValidator>();
 
+        services.AddOptions<RakitPlaygroundOptions>()
+            .Bind(configuration.GetSection(RakitPlaygroundOptions.SectionName))
+            .Validate(o => o.MaxRows is >= 1 and <= RakitPlaygroundOptions.MaxRowsLimit,
+                $"Rakit:Playground:MaxRows must be between 1 and {RakitPlaygroundOptions.MaxRowsLimit}.")
+            .Validate(o => o.TimeoutSeconds is >= 1 and <= RakitPlaygroundOptions.MaxTimeoutSeconds,
+                $"Rakit:Playground:TimeoutSeconds must be between 1 and {RakitPlaygroundOptions.MaxTimeoutSeconds}.")
+            .Validate(o => o.MaxScriptLength is >= 1000 and <= 2_000_000,
+                "Rakit:Playground:MaxScriptLength must be between 1000 and 2000000.")
+            .ValidateOnStart();
+
         services.AddSingleton<IDbConnectionFactory, DbConnectionFactory>();
         services.AddSingleton<IDbHealthService, DbHealthService>();
         services.AddSingleton<ISchemaBrowserService, SchemaBrowserService>();
+        services.AddSingleton<IPlaygroundService, PlaygroundService>();
         services.AddSingleton<ISpWhitelistService, SpWhitelistService>();
         services.AddSingleton<IDataSourceRepository, DataSourceRepository>();
         services.AddSingleton<ISqlExecutionService, SqlExecutionService>();

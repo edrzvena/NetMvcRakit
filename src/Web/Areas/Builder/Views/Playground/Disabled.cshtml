@@ -1,0 +1,17 @@
+@{
+    ViewData["Title"] = "Playground";
+}
+
+<h1 class="h3 mb-3">Playground</h1>
+
+<div class="alert alert-info" role="note">
+    <p class="mb-2"><strong>Playground dimatikan.</strong> Layar ini menjalankan SQL yang diketik di browser, dan situs belum punya login, jadi
+    ia mati secara default.</p>
+    <p class="mb-2">Untuk pengembangan, nyalakan di <code>appsettings.Development.json</code>:</p>
+    <pre class="mb-2"><code>"Rakit": {
+  "Playground": { "Enabled": true }
+}</code></pre>
+    <p class="mb-0">Atau lewat environment variable <code>Rakit__Playground__Enabled=true</code>, lalu jalankan ulang aplikasi. Secara default semua
+    yang dijalankan di sini hanya baca (selalu di-rollback); menulis dan membuat objek butuh
+    <code>Rakit__Playground__AllowWrite=true</code> dan hanya berlaku untuk schema <code>app</code>.</p>
+</div>

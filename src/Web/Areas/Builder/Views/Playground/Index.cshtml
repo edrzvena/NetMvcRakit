@@ -1,0 +1,177 @@
+@model PlaygroundIndexViewModel
+@{
+    ViewData["Title"] = "Playground";
+    var s = Model.Settings;
+    string ToJson(object o) => System.Text.Json.JsonSerializer.Serialize(o);
+}
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <h1 class="h3 mb-0">Playground</h1>
+    @if (s.AllowWrite)
+    {
+        <span class="badge text-bg-warning" title="Rakit:Playground:AllowWrite = true">Baca-tulis: skrip bisa di-commit ke database</span>
+    }
+    else
+    {
+        <span class="badge text-bg-secondary" title="Rakit:Playground:AllowWrite = false">Hanya baca: semua yang dijalankan selalu di-rollback</span>
+    }
+</div>
+
+<div id="pg-root"
+     data-base="@Url.Content("~/Builder/Playground")"
+     data-ace="@Url.Content("~/lib/ace")"
+     data-write="@(s.AllowWrite ? "1" : "0")"
+     data-default-rows="@s.DefaultMaxRows"
+     data-max-rows="@s.MaxRowsLimit"
+     data-timeout="@s.DefaultTimeoutSeconds"
+     data-max-timeout="@s.MaxTimeoutSeconds"
+     data-schemas="@ToJson(s.Schemas)"
+     data-types="@ToJson(Model.ColumnTypes)">
+    @Html.AntiForgeryToken()
+
+    <div class="pg-layout">
+        @* ---------------- object tree ---------------- *@
+        <aside class="card pg-side" aria-label="Objek database">
+            <div class="pg-side-head">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="search" class="form-control" id="pg-tree-filter" placeholder="Cari objek" autocomplete="off" aria-label="Cari objek" />
+                    <button type="button" class="btn btn-outline-secondary" id="pg-tree-refresh" data-bs-toggle="tooltip" title="Muat ulang" aria-label="Muat ulang objek"><i class="bi bi-arrow-clockwise"></i></button>
+                    <button type="button" class="btn btn-outline-primary" id="pg-new-table" data-bs-toggle="tooltip" title="Tabel baru" aria-label="Tabel baru"><i class="bi bi-plus-lg"></i></button>
+                </div>
+            </div>
+            <div class="pg-tree" id="pg-tree" role="tree"><div class="text-muted small p-2">Memuat objek...</div></div>
+        </aside>
+
+        @* ---------------- query + structure ---------------- *@
+        <section class="pg-main">
+            <ul class="nav nav-tabs mb-3" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="pg-tab-query" data-bs-toggle="tab" data-bs-target="#pg-pane-query" type="button" role="tab" aria-controls="pg-pane-query" aria-selected="true"><i class="bi bi-terminal"></i> Query</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="pg-tab-structure" data-bs-toggle="tab" data-bs-target="#pg-pane-structure" type="button" role="tab" aria-controls="pg-pane-structure" aria-selected="false"><i class="bi bi-diagram-2"></i> Struktur</button>
+                </li>
+            </ul>
+
+            <div class="tab-content">
+                <div class="tab-pane fade show active" id="pg-pane-query" role="tabpanel" aria-labelledby="pg-tab-query">
+                    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                        <button type="button" class="btn btn-primary btn-sm" id="pg-run"><i class="bi bi-play-fill"></i> Jalankan <kbd class="ms-1">Ctrl+Enter</kbd></button>
+                        <button type="button" class="btn btn-outline-danger btn-sm d-none" id="pg-cancel"><i class="bi bi-stop-fill"></i> Batal</button>
+
+                        <label class="small text-muted ms-2" for="pg-maxrows">Baris</label>
+                        <select class="form-select form-select-sm w-auto" id="pg-maxrows">
+                            @foreach (var n in new[] { 100, 500, 1000, 2000, 5000 }.Where(n => n <= s.MaxRowsLimit).Append(s.DefaultMaxRows).Distinct().Order())
+                            {
+                                <option value="@n" selected="@(n == s.DefaultMaxRows)">@n</option>
+                            }
+                        </select>
+
+                        <label class="small text-muted" for="pg-timeout">Timeout (dtk)</label>
+                        <input type="number" class="form-control form-control-sm" style="width: 5.5rem" id="pg-timeout" min="1" max="@s.MaxTimeoutSeconds" value="@s.DefaultTimeoutSeconds" />
+
+                        @if (s.AllowWrite)
+                        {
+                            <div class="form-check ms-2 mb-0">
+                                <input class="form-check-input" type="checkbox" id="pg-rollback" />
+                                <label class="form-check-label small" for="pg-rollback">Uji coba (rollback)</label>
+                            </div>
+                        }
+
+                        <div class="ms-auto d-flex gap-1">
+                            <div class="dropdown">
+                                <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-clock-history"></i> Riwayat</button>
+                                <ul class="dropdown-menu dropdown-menu-end pg-history" id="pg-history-menu"></ul>
+                            </div>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" id="pg-clear" data-bs-toggle="tooltip" title="Kosongkan editor" aria-label="Kosongkan editor"><i class="bi bi-eraser"></i></button>
+                        </div>
+                    </div>
+
+                    <div class="pg-editor-wrap"><div id="pg-editor" aria-label="Editor SQL"></div></div>
+                    <div class="form-text mb-3">
+                        Teks yang dipilih dijalankan sendiri. Pisahkan batch dengan baris <code>GO</code>.
+                        @if (!s.AllowWrite)
+                        {
+                            <text>Mode hanya baca: <code>INSERT</code>, <code>UPDATE</code>, <code>CREATE</code>, dan sejenisnya ditolak database; prosedur boleh dijalankan, hasilnya selalu di-rollback.</text>
+                        }
+                        else
+                        {
+                            <text>Jika ada batch yang error, seluruh skrip di-rollback.</text>
+                        }
+                    </div>
+
+                    <div id="pg-results"><div class="text-muted small">Hasil muncul di sini.</div></div>
+                </div>
+
+                <div class="tab-pane fade" id="pg-pane-structure" role="tabpanel" aria-labelledby="pg-tab-structure">
+                    <div id="pg-structure"><div class="text-muted small">Pilih tabel, view, prosedur, atau fungsi di daftar kiri.</div></div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    @* ---------------- new table designer ---------------- *@
+    <div class="modal fade" id="pg-table-modal" tabindex="-1" aria-labelledby="pg-table-title" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5" id="pg-table-title">Tabel baru</h2>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Tutup"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-3">
+                            <label class="form-label" for="pg-nt-schema">Schema</label>
+                            <select class="form-select" id="pg-nt-schema">
+                                @foreach (var schema in s.Schemas)
+                                {
+                                    <option value="@schema">@schema</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-5">
+                            <label class="form-label" for="pg-nt-name">Nama tabel</label>
+                            <input class="form-control" id="pg-nt-name" maxlength="128" placeholder="mis. Products" autocomplete="off" />
+                        </div>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle mb-2" id="pg-nt-table">
+                            <thead>
+                                <tr>
+                                    <th style="min-width: 11rem">Kolom</th>
+                                    <th style="min-width: 11rem">Tipe</th>
+                                    <th style="min-width: 7rem">Ukuran</th>
+                                    <th class="text-center">Null</th>
+                                    <th class="text-center">PK</th>
+                                    <th class="text-center">Identity</th>
+                                    <th style="min-width: 11rem">Default</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="pg-nt-add"><i class="bi bi-plus-lg"></i> Kolom</button>
+                    <div class="form-text mt-2">
+                        Ukuran: panjang atau <code>max</code> untuk teks/biner, <code>presisi,skala</code> untuk decimal, skala untuk datetime2/time. Default: angka, teks apa adanya, <code>true</code>/<code>false</code> untuk bit,
+                        atau <code>GETDATE()</code> / <code>GETUTCDATE()</code> / <code>NEWID()</code>. Tombol di bawah hanya <strong>membuat skrip</strong> di editor; Anda yang menjalankannya.
+                    </div>
+                    <div class="alert alert-danger py-2 mt-3 d-none" id="pg-nt-error" role="alert"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Batal</button>
+                    <button type="button" class="btn btn-primary" id="pg-nt-make"><i class="bi bi-code-slash"></i> Buat skrip</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="~/lib/ace/ace.js"></script>
+    <script src="~/lib/ace/ext-language_tools.js"></script>
+    <script src="~/js/copy-id.js" asp-append-version="true"></script>
+    <script src="~/js/playground.js" asp-append-version="true"></script>
+}
