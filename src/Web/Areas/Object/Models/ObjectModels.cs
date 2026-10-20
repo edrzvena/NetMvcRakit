@@ -31,6 +31,24 @@ public sealed record ObjectLookupItem(string Value, string Text);
 /// <summary>One page of the choices of a select / browse field. <see cref="Total"/> is null when the data source cannot count.</summary>
 public sealed record ObjectLookup(IReadOnlyList<ObjectLookupItem> Items, int? Total, int Skip, int Take, bool HasNext);
 
+/// <param name="Color"><c>#RRGGBB</c> or null (the page's own palette).</param>
+/// <param name="Data">One entry per label; null = no number (a gap).</param>
+public sealed record ObjectChartSeries(string Label, string? Color, IReadOnlyList<double?> Data);
+
+/// <summary>What a Chart module's data endpoint answers. <see cref="Kind"/> is bar / line / area / pie / doughnut.</summary>
+public sealed record ObjectChartData(
+    string Kind,
+    IReadOnlyList<string> Labels,
+    IReadOnlyList<ObjectChartSeries> Series,
+    bool Stacked,
+    bool Horizontal,
+    bool Legend,
+    string? Title,
+    bool Truncated);
+
+/// <summary>What a Widget module's data endpoint answers. <see cref="Text"/> is formatted on the server; <see cref="Value"/> is the raw value (number, boolean or text).</summary>
+public sealed record ObjectWidgetData(object? Value, string? Text, string? Label, string Color, int RefreshSeconds);
+
 /// <summary>A write went through.</summary>
 public sealed record ObjectDone(string Message);
 

@@ -46,6 +46,20 @@ public interface IModuleVisualService
     /// <exception cref="SqlExecutionException"/>
     Task<ModuleWidgetResult> GetWidgetAsync(Guid moduleId, bool allowDraft, ParameterContext context, CancellationToken ct = default);
 
+    /// <summary>For a module the caller already loaded (and checked as published / draft) with <see cref="IModuleRuntimeService.GetModuleAsync"/>.</summary>
+    /// <exception cref="ModuleNotFoundException">The module is not a Chart.</exception>
+    /// <exception cref="ModuleListUnavailableException"/>
+    /// <exception cref="ModuleListRequestException"/>
+    /// <exception cref="SqlExecutionException"/>
+    Task<ModuleChartResult> GetChartAsync(Module module, ParameterContext context, CancellationToken ct = default);
+
+    /// <summary>For a module the caller already loaded; see <see cref="GetChartAsync(Module, ParameterContext, CancellationToken)"/>.</summary>
+    /// <exception cref="ModuleNotFoundException">The module is not a Widget.</exception>
+    /// <exception cref="ModuleListUnavailableException"/>
+    /// <exception cref="ModuleListRequestException"/>
+    /// <exception cref="SqlExecutionException"/>
+    Task<ModuleWidgetResult> GetWidgetAsync(Module module, ParameterContext context, CancellationToken ct = default);
+
     /// <summary>
     /// Builder preview of a Chart that is not saved: validates <paramref name="input"/>, then runs it through the data source's
     /// preview path (Query only, at most 50 rows, procedures rolled back). Unlike the runtime, a value that is not a number
@@ -78,6 +92,22 @@ public sealed class ModuleVisualService(
     {
         var module = await GetModuleAsync(moduleId, allowDraft, ModuleType.Widget, ct);
         return await RunWidgetAsync(module, context, preview: false, ct);
+    }
+
+    public Task<ModuleChartResult> GetChartAsync(Module module, ParameterContext context, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(module);
+        return module.Type == ModuleType.Chart
+            ? RunChartAsync(module, context, preview: false, ct)
+            : throw new ModuleNotFoundException(module.Id);
+    }
+
+    public Task<ModuleWidgetResult> GetWidgetAsync(Module module, ParameterContext context, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(module);
+        return module.Type == ModuleType.Widget
+            ? RunWidgetAsync(module, context, preview: false, ct)
+            : throw new ModuleNotFoundException(module.Id);
     }
 
     public Task<ModuleChartResult> PreviewChartAsync(ModuleInput input, ParameterContext context, CancellationToken ct = default)

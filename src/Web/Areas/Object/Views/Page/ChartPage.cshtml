@@ -1,0 +1,29 @@
+@model Rakit.Core.Modules.Module
+@{
+    ViewData["Title"] = Model.Name;
+
+    // A Chart module: the canvas is drawn by chart-render.js from /data. Inside a Page module (?embed=1) the module's own name is
+    // left out (the chart has its own title) and only the label stays for screen readers.
+    var embedded = Context.Request.Query["embed"] == "1";
+}
+
+@if (!embedded)
+{
+    <h1 class="h3 mb-1">@Model.Name</h1>
+    @if (!string.IsNullOrWhiteSpace(Model.Description))
+    {
+        <p class="text-muted">@Model.Description</p>
+    }
+}
+
+<div id="visual-page" data-type="chart" data-url="@Url.Action("Data", "Page", new { area = "Object", moduleId = Model.Id })" aria-label="@Model.Name">
+    <div id="visual-status" class="small text-muted mb-2" role="status" aria-live="polite">Memuat...</div>
+    <div id="visual-error" class="alert alert-danger d-none" role="alert"></div>
+    <div id="visual-host"></div>
+</div>
+
+@section Scripts {
+    <script src="~/lib/chart.js/chart.umd.min.js"></script>
+    <script src="~/js/chart-render.js" asp-append-version="true"></script>
+    <script src="~/js/visual-page.js" asp-append-version="true"></script>
+}

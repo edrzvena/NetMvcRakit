@@ -1,0 +1,28 @@
+@model Rakit.Core.Modules.Module
+@{
+    ViewData["Title"] = Model.Name;
+
+    // A Widget module: one KPI card drawn by chart-render.js from /data (which also says how often to reload it). Inside a Page
+    // module (?embed=1) the module's own name is left out: the card carries its own label.
+    var embedded = Context.Request.Query["embed"] == "1";
+}
+
+@if (!embedded)
+{
+    <h1 class="h3 mb-1">@Model.Name</h1>
+    @if (!string.IsNullOrWhiteSpace(Model.Description))
+    {
+        <p class="text-muted">@Model.Description</p>
+    }
+}
+
+<div id="visual-page" data-type="widget" data-url="@Url.Action("Data", "Page", new { area = "Object", moduleId = Model.Id })" aria-label="@Model.Name">
+    <div id="visual-error" class="alert alert-danger d-none" role="alert"></div>
+    <div id="visual-host" class="@(embedded ? "" : "col-sm-8 col-md-5 col-lg-4")"></div>
+    <div id="visual-status" class="small text-muted mt-2" role="status" aria-live="polite">Memuat...</div>
+</div>
+
+@section Scripts {
+    <script src="~/js/chart-render.js" asp-append-version="true"></script>
+    <script src="~/js/visual-page.js" asp-append-version="true"></script>
+}

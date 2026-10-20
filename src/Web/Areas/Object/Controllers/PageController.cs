@@ -13,15 +13,15 @@ using Rakit.Web.Areas.Object.Models;
 namespace Rakit.Web.Areas.Object.Controllers;
 
 /// <summary>
-/// Runtime page of a Table module (RUN-01): <c>/object/page/{moduleId}</c> is the shell, <c>.../data</c> the JSON the
-/// grid loads. Only Published modules exist here; a draft looks exactly like a missing module.
+/// Runtime page of a module (RUN-01): <c>/object/page/{moduleId}</c> is the shell, <c>.../data</c> the JSON it loads (a Table's
+/// grid page, a Chart's series or a Widget's value, by the module's type). Only Published modules exist here; a draft looks exactly like a missing module.
 /// The page's own query string is passed on to the data source (RUN-05); the grid's controls use the reserved
 /// <c>_skip</c>, <c>_take</c>, <c>_order</c> and <c>_q</c> keys so they cannot collide with a data source's own parameters.
 /// </summary>
 [Area("Object")]
 [Route("object/page")]
 public class PageController(
-    IModuleRuntimeService runtime, IModuleRecordService records, IModuleLookupService lookups,
+    IModuleRuntimeService runtime, IModuleRecordService records, IModuleLookupService lookups, IModuleVisualService visual,
     IOptions<RakitDbOptions> dbOptions, ILogger<PageController> logger)
     : Controller
 {
@@ -47,7 +47,9 @@ public class PageController(
             {
                 ModuleType.Table => View(module),
                 ModuleType.Form => View("FormPage", module),
-                _ => NotFound(), // Chart / Widget get their views with the runtime task
+                ModuleType.Chart => View("ChartPage", module),
+                ModuleType.Widget => View("WidgetPage", module),
+                _ => NotFound(),
             };
         }
         catch (ModuleNotFoundException)
@@ -76,9 +78,15 @@ public class PageController(
         Response.Headers.CacheControl = "no-store";
         try
         {
+            // The module's type decides what the JSON is: a Table grid page, a Chart's series or a Widget's value (all published only).
+            var module = await runtime.GetModuleAsync(moduleId, allowDraft: false, ct);
+            var context = await HttpParameterContext.FromAsync(HttpContext, ct);
+            if (module.Type == ModuleType.Chart) return Json(ToChart(await visual.GetChartAsync(module, context, ct)));
+            if (module.Type == ModuleType.Widget) return Json(ToWidget(await visual.GetWidgetAsync(module, context, ct)));
+
             var query = Request.Query;
             var result = await runtime.GetListAsync(
-                moduleId, allowDraft: false, await HttpParameterContext.FromAsync(HttpContext, ct),
+                module, context,
                 new ModuleListRequest(ToInt(query["_skip"]), ToInt(query["_take"]), query["_order"].FirstOrDefault(), query["_q"].FirstOrDefault()), ct);
 
             var columns = result.Columns;
@@ -220,6 +228,24 @@ public class PageController(
         => Error(ex.Kind == SqlExecErrorKind.Timeout ? StatusCodes.Status504GatewayTimeout
             : ex.Kind == SqlExecErrorKind.Business ? StatusCodes.Status422UnprocessableEntity
             : StatusCodes.Status500InternalServerError, ex.Message);
+
+    internal static ObjectChartData ToChart(ModuleChartResult chart) => new(
+        chart.Kind.ToString().ToLowerInvariant(), chart.Labels,
+        chart.Series.Select(s => new ObjectChartSeries(s.Name, s.Color, s.Data)).ToList(),
+        chart.Stacked, chart.Horizontal, chart.Legend, chart.Title, chart.Truncated);
+
+    internal static ObjectWidgetData ToWidget(ModuleWidgetResult widget) => new(
+        WidgetValue(widget.Value), widget.Text, widget.Label, widget.Color, widget.RefreshSeconds);
+
+    /// <summary>The raw value for JSON: numbers and booleans as they are, anything else (dates, text, bytes) as invariant text.</summary>
+    private static object? WidgetValue(object? value) => value switch
+    {
+        null => null,
+        bool or byte or sbyte or short or ushort or int or uint or long or ulong or decimal => value,
+        float f when float.IsFinite(f) => f,
+        double d when double.IsFinite(d) => d,
+        _ => ModuleCellFormatter.Plain(value),
+    };
 
     private static ObjectActions ToActions(ModuleRecordActions actions) => new(actions.CanAdd, actions.CanEdit, actions.CanDelete);
 

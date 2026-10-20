@@ -59,6 +59,14 @@ public interface IModuleRuntimeService
         Guid moduleId, bool allowDraft, ParameterContext context, ModuleListRequest? request = null, CancellationToken ct = default);
 
     /// <summary>
+    /// Same as the overload by id, for a module the caller already loaded with <see cref="GetModuleAsync"/> (which has done the
+    /// published / draft check), so a request that needs the module's type first does not read it twice.
+    /// </summary>
+    /// <exception cref="ModuleNotFoundException">The module is not a Table.</exception>
+    Task<ModuleListResult> GetListAsync(
+        Module module, ParameterContext context, ModuleListRequest? request = null, CancellationToken ct = default);
+
+    /// <summary>
     /// Builder preview of a module that is not saved (yet): validates <paramref name="input"/>, then runs it like
     /// <see cref="GetListAsync"/>, except through the data source's preview path (Query only, at most 50 rows,
     /// stored procedures rolled back). The returned <see cref="ModuleListResult.Module"/> has an empty Id and status Draft.
@@ -88,7 +96,14 @@ public sealed class ModuleRuntimeService(
         Guid moduleId, bool allowDraft, ParameterContext context, ModuleListRequest? request = null, CancellationToken ct = default)
     {
         var module = await GetModuleAsync(moduleId, allowDraft, ct);
-        if (module.Type != ModuleType.Table) throw new ModuleNotFoundException(moduleId); // Form / Page modules have no list
+        return await GetListAsync(module, context, request, ct);
+    }
+
+    public async Task<ModuleListResult> GetListAsync(
+        Module module, ParameterContext context, ModuleListRequest? request = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(module);
+        if (module.Type != ModuleType.Table) throw new ModuleNotFoundException(module.Id); // Form / Page / Chart / Widget modules have no list
         return await RunListAsync(module, context, request, preview: false, ct);
     }
 
