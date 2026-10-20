@@ -141,8 +141,11 @@ public sealed class ModuleVisualService(
         var chart = module.Config.Chart ?? throw Unavailable(module, "the module has no chart configuration", null);
         var maxRows = Math.Clamp(chart.MaxRows, 1, ModuleChart.HardMaxRows);
 
-        // One row more than the chart shows, so a longer result can be told apart from one that just fits.
-        var list = await RunAsync(module, context, take: maxRows + 1, preview, ct);
+        // One row more than the chart shows, so a longer result can be told apart from one that just fits. A Table data source
+        // never returns more than TableQueryRequest.MaxTake rows, so with maxRows at that size the extra row never comes: ask
+        // for the total instead (data sources that cannot count leave it null; their own row cap marks the cut).
+        var needTotal = maxRows >= TableQueryRequest.MaxTake;
+        var (list, total) = await RunAsync(module, context, take: maxRows + 1, includeTotal: needTotal, preview, ct);
 
         var labelIndex = IndexOf(list.Columns, chart.LabelField.Trim());
         if (labelIndex < 0) throw Unavailable(module, $"the result has no column '{chart.LabelField}' for the labels", null);
@@ -178,7 +181,7 @@ public sealed class ModuleVisualService(
         }
 
         // Also truncated when the executor cut the result at its own cap (the preview's 50 rows, or 1000 otherwise).
-        var truncated = list.Rows.Count > maxRows || list.Truncated;
+        var truncated = list.Rows.Count > maxRows || list.Truncated || (total is { } count && count > maxRows);
 
         var title = string.IsNullOrWhiteSpace(chart.Title) ? null : chart.Title.Trim();
         return new ModuleChartResult(module, chart.Kind, labels, seriesResult, chart.Stacked, chart.Horizontal, chart.Legend, title, truncated);
@@ -188,7 +191,7 @@ public sealed class ModuleVisualService(
     {
         var widget = module.Config.Widget ?? throw Unavailable(module, "the module has no widget configuration", null);
 
-        var list = await RunAsync(module, context, take: 1, preview, ct);
+        var (list, _) = await RunAsync(module, context, take: 1, includeTotal: false, preview, ct);
 
         var valueIndex = IndexOf(list.Columns, widget.ValueField.Trim());
         if (valueIndex < 0) throw Unavailable(module, $"the result has no column '{widget.ValueField}' for the value", null);
@@ -211,8 +214,9 @@ public sealed class ModuleVisualService(
         return new ModuleWidgetResult(module, value, FormatValue(value, widget), label, widget.Color, widget.RefreshSeconds);
     }
 
-    /// <summary>Runs the module's List data source from a Skip 0 / Take <paramref name="take"/> request and returns its list result set.</summary>
-    private async Task<DataTableResult> RunAsync(Module module, ParameterContext context, int take, bool preview, CancellationToken ct)
+    /// <summary>Runs the module's List data source from a Skip 0 / Take <paramref name="take"/> request; returns its list result set and the total row count when asked for and known.</summary>
+    private async Task<(DataTableResult List, int? Total)> RunAsync(
+        Module module, ParameterContext context, int take, bool includeTotal, bool preview, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(context);
 
@@ -223,7 +227,7 @@ public sealed class ModuleVisualService(
         DataSourceResult result;
         try
         {
-            var run = new DataSourceRunRequest(0, take, IncludeTotal: false);
+            var run = new DataSourceRunRequest(0, take, IncludeTotal: includeTotal);
             result = preview
                 ? await dataSources.ExecuteForPreviewAsync(dataSourceId.Value, context, run, ct)
                 : await dataSources.ExecuteAsync(dataSourceId.Value, context, run, ct);
@@ -239,7 +243,8 @@ public sealed class ModuleVisualService(
             throw new ModuleListRequestException(ExceptionMessages.WithoutParameterSuffix(ex), ex);
         }
 
-        return result.List ?? throw Unavailable(module, "the data source returned no result set at the list position", null);
+        var list = result.List ?? throw Unavailable(module, "the data source returned no result set at the list position", null);
+        return (list, result.TotalCount);
     }
 
     /// <summary>The widget's value as the card shows it: formatted by its format (numbers with the configured decimals), then prefix and suffix.</summary>
