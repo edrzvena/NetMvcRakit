@@ -21,7 +21,7 @@
         </div>
         <div class="form-check form-check-inline">
             <input class="form-check-input" type="radio" name="TargetType" id="t-folder" value="Folder" checked="@(Model.TargetType == MenuTargetType.Folder)" />
-            <label class="form-check-label" for="t-folder">Folder (dropdown)</label>
+            <label class="form-check-label" for="t-folder">Folder (grup yang bisa dilipat)</label>
         </div>
         <div class="form-check form-check-inline">
             <input class="form-check-input" type="radio" name="TargetType" id="t-delimiter" value="Delimiter" checked="@(Model.TargetType == MenuTargetType.Delimiter)" />
@@ -29,7 +29,7 @@
         </div>
         @if (Model.HasChildren)
         {
-            <div class="form-text">Item ini punya anak: sebagai folder atau item biasa ia jadi judul dropdown (tujuannya tidak dipakai selama punya anak).</div>
+            <div class="form-text">Item ini punya anak: sebagai folder atau item biasa ia jadi judul grup (tujuannya tidak dipakai selama punya anak).</div>
         }
     </div>
 
@@ -41,7 +41,7 @@
         <div class="col-md-3" id="field-icon">
             <label class="form-label" for="Icon">Ikon</label>
             <input class="form-control" id="Icon" name="Icon" value="@Model.Icon" maxlength="50" placeholder="mis. bi-people" />
-            <div class="form-text">Nama saja (huruf/angka/_/-). Disimpan; belum ditampilkan karena belum ada font ikon.</div>
+            <div class="form-text">Nama ikon dari <a href="https://icons.getbootstrap.com/" target="_blank" rel="noopener">Bootstrap Icons</a>, mis. <code>bi-people</code> atau cukup <code>people</code>. Tampil di menu samping; kosong = ikon bawaan.</div>
         </div>
         <div class="col-md-2">
             <label class="form-label" for="Order">Urutan</label>

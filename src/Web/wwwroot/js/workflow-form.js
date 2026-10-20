@@ -283,7 +283,10 @@
         selected = step;
         selectedEdge = null;
         renderAll();
-        canvas.scrollTo({ left: Math.max(0, step.x - 120), top: Math.max(0, step.y - 120) });
+        // bring the new box into view only when it is off screen (so "Mulai" is not scrolled away needlessly)
+        const right = step.x + NODE_W + 40, bottom = step.y + NODE_H + 40;
+        if (right > canvas.scrollLeft + canvas.clientWidth) canvas.scrollLeft = right - canvas.clientWidth;
+        if (bottom > canvas.scrollTop + canvas.clientHeight) canvas.scrollTop = bottom - canvas.clientHeight;
     }
 
     function autoLayout() {

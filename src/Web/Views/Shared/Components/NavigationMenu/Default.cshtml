@@ -1,35 +1,39 @@
 @using Rakit.Web.ViewComponents
 @model IReadOnlyList<NavEntry>
 
+@* The menu from rakit.Menus as sidebar entries: an item is a link, a folder opens its children, a delimiter is a divider.
+   The icon is a Bootstrap Icons name (already checked by the view component). *@
 @foreach (var item in Model)
 {
     if (item.IsDelimiter)
     {
-        <li class="nav-item d-none d-sm-block" aria-hidden="true"><span class="nav-link text-muted disabled">|</span></li>
+        <div class="rk-divider" role="separator"></div>
     }
     else if (item.Children.Count > 0)
     {
-        <li class="nav-item dropdown">
-            <a class="nav-link dropdown-toggle text-dark @(item.IsActive ? "active fw-semibold" : "")" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">@item.Label</a>
-            <ul class="dropdown-menu">
+        <div class="rk-group @(item.IsActive ? "has-active is-open" : "")">
+            <button type="button" class="rk-group-toggle" data-key="@item.Label" aria-expanded="@(item.IsActive ? "true" : "false")">
+                <i class="bi @(item.Icon ?? "bi-folder2")"></i>
+                <span>@item.Label</span>
+                <i class="bi bi-chevron-right rk-chevron"></i>
+            </button>
+            <div class="rk-sub">
                 @foreach (var child in item.Children)
                 {
                     if (child.IsDelimiter)
                     {
-                        <li><hr class="dropdown-divider" /></li>
+                        <div class="rk-divider" role="separator" style="margin: .4rem .6rem"></div>
                     }
                     else
                     {
-                        <li><a class="dropdown-item @(child.IsActive ? "active" : "")" href="@child.Href">@child.Label</a></li>
+                        <a class="rk-link @(child.IsActive ? "active" : "")" href="@child.Href"><i class="bi @(child.Icon ?? "bi-dot")"></i><span>@child.Label</span></a>
                     }
                 }
-            </ul>
-        </li>
+            </div>
+        </div>
     }
     else
     {
-        <li class="nav-item">
-            <a class="nav-link text-dark @(item.IsActive ? "active fw-semibold" : "")" href="@item.Href">@item.Label</a>
-        </li>
+        <a class="rk-link @(item.IsActive ? "active" : "")" href="@item.Href"><i class="bi @(item.Icon ?? "bi-app-indicator")"></i><span>@item.Label</span></a>
     }
 }

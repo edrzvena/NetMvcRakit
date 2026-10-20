@@ -5,7 +5,7 @@ using Rakit.Core.Modules;
 namespace Rakit.Web.ViewComponents;
 
 /// <summary>One navigation entry ready to draw: the address is resolved and the current page is marked.</summary>
-public sealed record NavEntry(string Label, string? Href, bool IsDelimiter, bool IsActive, IReadOnlyList<NavEntry> Children);
+public sealed record NavEntry(string Label, string? Href, bool IsDelimiter, bool IsActive, IReadOnlyList<NavEntry> Children, string? Icon = null);
 
 /// <summary>
 /// The dynamic part of the navbar, built from rakit.Menus. A broken or unreachable database must never break the page
@@ -41,6 +41,19 @@ public sealed class NavigationMenuViewComponent(IMenuNavigationService navigatio
         var active = children.Count > 0
             ? children.Any(c => c.IsActive)
             : href is not null && href.StartsWith('/') && string.Equals(href, currentPath, StringComparison.OrdinalIgnoreCase);
-        return new NavEntry(item.Label, children.Count > 0 ? null : href, item.IsDelimiter, active, children);
+        return new NavEntry(item.Label, children.Count > 0 ? null : href, item.IsDelimiter, active, children, IconClass(item.Icon));
+    }
+
+    /// <summary>
+    /// A Bootstrap Icons class from what a builder typed ("bi-people", "people", "bi bi-people"), or null when it is not a plain
+    /// icon name. Only letters, digits and dashes get through, so the text can never become anything but a class name.
+    /// </summary>
+    private static string? IconClass(string? icon)
+    {
+        var text = icon?.Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(text)) return null;
+        if (text.StartsWith("bi bi-", StringComparison.Ordinal)) text = text[3..];
+        if (!text.StartsWith("bi-", StringComparison.Ordinal)) text = "bi-" + text;
+        return System.Text.RegularExpressions.Regex.IsMatch(text, "^bi-[a-z0-9-]{1,50}$") ? text : null;
     }
 }

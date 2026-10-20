@@ -69,7 +69,7 @@ public class PageController(
     private string EmbedMarkup(Guid moduleId)
     {
         var url = Url.Action("Index", "Page", new { area = "Object", moduleId, embed = 1 }) ?? "";
-        return "<div class=\"mb-3\"><iframe data-rakit-embed class=\"w-100 border-0\" style=\"height: 320px\" loading=\"lazy\" title=\"Module tersemat\" src=\""
+        return "<div class=\"rk-embed mb-3\"><iframe data-rakit-embed class=\"w-100 border-0\" style=\"height: 320px\" loading=\"lazy\" title=\"Module tersemat\" src=\""
             + HtmlEncoder.Default.Encode(url) + "\"></iframe></div>";
     }
 

@@ -1,69 +1,86 @@
+@{
+    // Which built-in link is the current page: the area and controller of the request.
+    var area = ViewContext.RouteData.Values["area"] as string ?? "";
+    var controller = ViewContext.RouteData.Values["controller"] as string ?? "";
+    string Active(string a, string c) => string.Equals(area, a, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(controller, c, StringComparison.OrdinalIgnoreCase) ? "active" : "";
+    var isHome = area == "" && string.Equals(controller, "Home", StringComparison.OrdinalIgnoreCase);
+    var title = ViewData["Title"] as string ?? "Rakit";
+}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="id" data-bs-theme="light">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>@ViewData["Title"] - Rakit</title>
-    <script type="importmap"></script>
+    <title>@title - Rakit</title>
+    <script>
+        // the chosen theme before the first paint (no flash); falls back to the system setting
+        (function () {
+            try {
+                var t = localStorage.getItem('rakit-theme');
+                if (t !== 'dark' && t !== 'light') t = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+                document.documentElement.setAttribute('data-bs-theme', t);
+            } catch (e) { /* storage blocked: the light theme stays */ }
+        })();
+    </script>
+    <link rel="preload" href="~/lib/inter/files/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="~/lib/bootstrap-icons/bootstrap-icons.min.css" />
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
-    <link rel="stylesheet" href="~/Rakit.Web.styles.css" asp-append-version="true" />
 </head>
-<body>
-    <header>
-        <nav class="navbar navbar-expand-sm navbar-toggleable-sm navbar-light bg-white border-bottom box-shadow mb-3">
-            <div class="container-fluid">
-                <a class="navbar-brand" asp-area="" asp-controller="Home" asp-action="Index">Rakit</a>
-                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target=".navbar-collapse" aria-controls="navbarSupportedContent"
-                        aria-expanded="false" aria-label="Toggle navigation">
-                    <span class="navbar-toggler-icon"></span>
-                </button>
-                <div class="navbar-collapse collapse d-sm-inline-flex justify-content-between">
-                    @* Home plus the menu built from rakit.Menus (Builder > Menu) *@
-                    <ul class="navbar-nav flex-grow-1">
-                        <li class="nav-item">
-                            <a class="nav-link text-dark" asp-area="" asp-controller="Home" asp-action="Index">Home</a>
-                        </li>
-                        @await Component.InvokeAsync("NavigationMenu")
-                    </ul>
-                    @* Builder and admin tools (no login yet, so everyone sees them) *@
-                    <ul class="navbar-nav">
-                        <li class="nav-item dropdown">
-                            <a class="nav-link dropdown-toggle text-dark" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">Builder</a>
-                            <ul class="dropdown-menu dropdown-menu-end">
-                                <li><a class="dropdown-item" asp-area="Builder" asp-controller="Module" asp-action="Index">Module</a></li>
-                                <li><a class="dropdown-item" asp-area="Builder" asp-controller="Workflow" asp-action="Index">Workflow</a></li>
-                                <li><a class="dropdown-item" asp-area="Builder" asp-controller="Menu" asp-action="Index">Menu</a></li>
-                                <li><a class="dropdown-item" asp-area="Builder" asp-controller="DataSource" asp-action="Index">Data Source</a></li>
-                                <li><a class="dropdown-item" asp-area="Builder" asp-controller="Schema" asp-action="Index">Schema</a></li>
-                            </ul>
-                        </li>
-                        <li class="nav-item dropdown">
-                            <a class="nav-link dropdown-toggle text-dark" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">Admin</a>
-                            <ul class="dropdown-menu dropdown-menu-end">
-                                <li><a class="dropdown-item" asp-area="Admin" asp-controller="SpWhitelist" asp-action="Index">SP Whitelist</a></li>
-                                <li><a class="dropdown-item" asp-area="Admin" asp-controller="Health" asp-action="Index">Health</a></li>
-                            </ul>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link text-dark" asp-area="" asp-controller="Home" asp-action="Privacy">Privacy</a>
-                        </li>
-                    </ul>
-                </div>
+<body class="rk-app">
+    <div class="rk-shell">
+        <aside class="rk-sidebar" id="rk-sidebar" aria-label="Navigasi utama">
+            <a class="rk-brand" asp-area="" asp-controller="Home" asp-action="Index">
+                <span class="rk-logo">R</span>
+                <span>Rakit<small>Low-code builder</small></span>
+            </a>
+
+            <nav class="rk-nav">
+                <a class="rk-link @(isHome ? "active" : "")" asp-area="" asp-controller="Home" asp-action="Index"><i class="bi bi-house-door"></i><span>Beranda</span></a>
+
+                @* The pages a builder published (Builder > Menu): items, folders and separators *@
+                @await Component.InvokeAsync("NavigationMenu")
+
+                @* Builder and admin tools (no login yet, so everyone sees them) *@
+                <div class="rk-section">Builder</div>
+                <a class="rk-link @Active("Builder", "Module")" asp-area="Builder" asp-controller="Module" asp-action="Index"><i class="bi bi-window-stack"></i><span>Module</span></a>
+                <a class="rk-link @Active("Builder", "Workflow")" asp-area="Builder" asp-controller="Workflow" asp-action="Index"><i class="bi bi-diagram-3"></i><span>Workflow</span></a>
+                <a class="rk-link @Active("Builder", "DataSource")" asp-area="Builder" asp-controller="DataSource" asp-action="Index"><i class="bi bi-database"></i><span>Data Source</span></a>
+                <a class="rk-link @Active("Builder", "Menu")" asp-area="Builder" asp-controller="Menu" asp-action="Index"><i class="bi bi-list-nested"></i><span>Menu</span></a>
+                <a class="rk-link @Active("Builder", "Schema")" asp-area="Builder" asp-controller="Schema" asp-action="Index"><i class="bi bi-table"></i><span>Schema</span></a>
+
+                <div class="rk-section">Admin</div>
+                <a class="rk-link @Active("Admin", "SpWhitelist")" asp-area="Admin" asp-controller="SpWhitelist" asp-action="Index"><i class="bi bi-shield-check"></i><span>SP Whitelist</span></a>
+                <a class="rk-link @Active("Admin", "Health")" asp-area="Admin" asp-controller="Health" asp-action="Index"><i class="bi bi-heart-pulse"></i><span>Health</span></a>
+            </nav>
+
+            <div class="rk-sidebar-foot">
+                <strong>Mode pengembangan</strong><br />
+                Belum ada login: semua halaman, termasuk Builder dan Admin, terbuka untuk siapa saja.
             </div>
-        </nav>
-    </header>
-    <div class="container">
-        <main role="main" class="pb-3">
-            @RenderBody()
-        </main>
+        </aside>
+        <div class="rk-backdrop" id="rk-backdrop"></div>
+
+        <div class="rk-main">
+            <header class="rk-topbar">
+                <button type="button" class="rk-icon-btn d-lg-none" id="rk-toggle" aria-label="Buka menu" aria-controls="rk-sidebar"><i class="bi bi-list"></i></button>
+                <div class="rk-crumb"><span>Rakit</span><i class="bi bi-chevron-right" style="font-size: .7rem"></i><strong>@title</strong></div>
+                <div class="ms-auto d-flex align-items-center gap-2">
+                    <button type="button" class="rk-icon-btn" id="rk-theme" aria-label="Ganti tema terang/gelap" title="Ganti tema"><i class="bi bi-moon-stars"></i></button>
+                </div>
+            </header>
+
+            <main role="main" class="rk-content">
+                @RenderBody()
+            </main>
+
+            <footer class="rk-footer">
+                &copy; 2026 Rakit &middot; <a asp-area="" asp-controller="Home" asp-action="Privacy">Privasi</a>
+            </footer>
+        </div>
     </div>
 
-    <footer class="border-top footer text-muted">
-        <div class="container">
-            &copy; 2026 - Rakit - <a asp-area="" asp-controller="Home" asp-action="Privacy">Privacy</a>
-        </div>
-    </footer>
     <script src="~/lib/jquery/dist/jquery.min.js"></script>
     <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
     <script src="~/js/site.js" asp-append-version="true"></script>

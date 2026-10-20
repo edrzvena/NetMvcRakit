@@ -1,14 +1,25 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="id" data-bs-theme="light">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>@ViewData["Title"] - Rakit</title>
+    <script>
+        // same theme as the page that embeds this one (same origin, same storage)
+        (function () {
+            try {
+                var t = localStorage.getItem('rakit-theme');
+                if (t !== 'dark' && t !== 'light') t = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+                document.documentElement.setAttribute('data-bs-theme', t);
+            } catch (e) { /* storage blocked: the light theme stays */ }
+        })();
+    </script>
     <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="~/lib/bootstrap-icons/bootstrap-icons.min.css" />
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
 </head>
-<body class="p-2">
-    @* The layout of a module shown inside a Page module (?embed=1): no navbar, no footer. *@
+<body class="rk-embed">
+    @* The layout of a module shown inside a Page module (?embed=1): no sidebar, no top bar, no footer. *@
     <main role="main">
         @RenderBody()
     </main>

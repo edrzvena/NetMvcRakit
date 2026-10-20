@@ -1,12 +1,142 @@
-﻿@{
-    ViewData["Title"] = "Home";
+﻿@using Rakit.Core.Modules
+@model HomeViewModel
+@{
+    ViewData["Title"] = "Beranda";
+
+    string IconOf(ModuleType type) => type switch
+    {
+        ModuleType.Table => "bi-table",
+        ModuleType.Form => "bi-ui-checks",
+        ModuleType.Page => "bi-file-richtext",
+        ModuleType.Chart => "bi-bar-chart-line",
+        ModuleType.Widget => "bi-speedometer2",
+        _ => "bi-app",
+    };
+    string KindOf(ModuleType type) => type switch
+    {
+        ModuleType.Table => "Tabel",
+        ModuleType.Form => "Form",
+        ModuleType.Page => "Halaman",
+        ModuleType.Chart => "Grafik",
+        ModuleType.Widget => "Widget",
+        _ => type.ToString(),
+    };
 }
 
-<div class="text-center">
-    <h1 class="display-4">Rakit</h1>
-    <p class="lead">Platform low-code untuk merakit page dan workflow di atas SQL Server. Fase F0: fondasi.</p>
+<section class="rk-hero mb-4">
+    <h1>Rakit halaman dan alur kerja, langsung di atas SQL Server.</h1>
     <p>
-        <a class="btn btn-primary" asp-area="Builder" asp-controller="Schema" asp-action="Index">Schema Browser</a>
-        <a class="btn btn-outline-secondary" asp-area="Admin" asp-controller="Health" asp-action="Index">Database Health</a>
+        Hubungkan tabel atau stored procedure, susun tabel, form, grafik, dan dasbor tanpa menulis aplikasi, lalu sambungkan tombolnya
+        ke workflow yang memanggil database, layanan luar, dan email.
     </p>
+    <div class="d-flex flex-wrap gap-2">
+        <a class="btn btn-light" asp-area="Builder" asp-controller="Module" asp-action="Create"><i class="bi bi-plus-lg me-1"></i>Module baru</a>
+        <a class="btn btn-outline-light btn-ghost" asp-area="Builder" asp-controller="Workflow" asp-action="Create"><i class="bi bi-diagram-3 me-1"></i>Workflow baru</a>
+        <a class="btn btn-outline-light btn-ghost" asp-area="Builder" asp-controller="DataSource" asp-action="Index"><i class="bi bi-database me-1"></i>Data source</a>
+    </div>
+</section>
+
+@if (!Model.DatabaseAvailable)
+{
+    <div class="alert alert-warning" role="alert">
+        <i class="bi bi-exclamation-triangle me-1"></i>
+        Database tidak dapat dihubungi, jadi angka dan daftar halaman di bawah kosong. Periksa di
+        <a asp-area="Admin" asp-controller="Health" asp-action="Index">Health</a>.
+    </div>
+}
+
+<div class="row g-3">
+    <div class="col-6 col-xl-3">
+        <a class="rk-stat" asp-area="Builder" asp-controller="Module" asp-action="Index">
+            <span class="rk-ico"><i class="bi bi-window-stack"></i></span>
+            <span><span class="rk-num">@Model.ModulesPublished</span><span class="text-muted fs-6 fw-normal"> / @Model.ModulesTotal</span><div class="rk-lbl">Module terbit</div></span>
+        </a>
+    </div>
+    <div class="col-6 col-xl-3">
+        <a class="rk-stat" asp-area="Builder" asp-controller="DataSource" asp-action="Index">
+            <span class="rk-ico"><i class="bi bi-database"></i></span>
+            <span><span class="rk-num">@Model.DataSources</span><div class="rk-lbl">Data source</div></span>
+        </a>
+    </div>
+    <div class="col-6 col-xl-3">
+        <a class="rk-stat" asp-area="Builder" asp-controller="Workflow" asp-action="Index">
+            <span class="rk-ico"><i class="bi bi-diagram-3"></i></span>
+            <span><span class="rk-num">@Model.Workflows</span><div class="rk-lbl">Workflow</div></span>
+        </a>
+    </div>
+    <div class="col-6 col-xl-3">
+        <a class="rk-stat" asp-area="Builder" asp-controller="Menu" asp-action="Index">
+            <span class="rk-ico"><i class="bi bi-list-nested"></i></span>
+            <span><span class="rk-num">@Model.MenuItems</span><div class="rk-lbl">Item menu</div></span>
+        </a>
+    </div>
+</div>
+
+<div class="rk-section-title">
+    <h2>Halaman yang sudah terbit</h2>
+    <a class="small" asp-area="Builder" asp-controller="Module" asp-action="Index">Kelola module</a>
+</div>
+@if (Model.Published.Count == 0)
+{
+    <div class="rk-card p-4 text-center">
+        <i class="bi bi-inbox fs-1 text-muted"></i>
+        <p class="mb-2 mt-2">Belum ada halaman yang dipublikasikan.</p>
+        <a class="btn btn-primary btn-sm" asp-area="Builder" asp-controller="Module" asp-action="Create">Buat module pertama</a>
+    </div>
+}
+else
+{
+    <div class="row g-3">
+        @foreach (var m in Model.Published.Take(9))
+        {
+            <div class="col-12 col-md-6 col-xl-4">
+                <a class="rk-tile" asp-area="Object" asp-controller="Page" asp-action="Index" asp-route-moduleId="@m.Id">
+                    <span class="rk-ico"><i class="bi @IconOf(m.Type)"></i></span>
+                    <span class="min-w-0">
+                        <div class="rk-name text-truncate">@m.Name</div>
+                        <div class="rk-kind">@KindOf(m.Type)@(m.GroupName is null ? "" : " · " + m.GroupName)</div>
+                    </span>
+                    <i class="bi bi-arrow-right ms-auto text-muted"></i>
+                </a>
+            </div>
+        }
+    </div>
+    @if (Model.Published.Count > 9)
+    {
+        <p class="small text-muted mt-2 mb-0">Dan @(Model.Published.Count - 9) lainnya di <a asp-area="Builder" asp-controller="Module" asp-action="Index">daftar module</a>.</p>
+    }
+}
+
+<div class="rk-section-title">
+    <h2>Mulai dari mana?</h2>
+</div>
+<div class="row g-3">
+    <div class="col-12 col-md-6 col-xl-3">
+        <a class="rk-step d-block" asp-area="Builder" asp-controller="DataSource" asp-action="Index">
+            <span class="rk-n">1</span>
+            <h3>Hubungkan data</h3>
+            <p>Buat data source dari tabel, query, atau stored procedure, lalu coba preview-nya.</p>
+        </a>
+    </div>
+    <div class="col-12 col-md-6 col-xl-3">
+        <a class="rk-step d-block" asp-area="Builder" asp-controller="Module" asp-action="Index">
+            <span class="rk-n">2</span>
+            <h3>Rakit module</h3>
+            <p>Tabel dengan CRUD, form, grafik, widget, atau halaman bebas yang menyatukan semuanya.</p>
+        </a>
+    </div>
+    <div class="col-12 col-md-6 col-xl-3">
+        <a class="rk-step d-block" asp-area="Builder" asp-controller="Workflow" asp-action="Index">
+            <span class="rk-n">3</span>
+            <h3>Susun workflow</h3>
+            <p>Gambar alurnya di kanvas: database, Rest, email, kondisi, dan halaman hasil.</p>
+        </a>
+    </div>
+    <div class="col-12 col-md-6 col-xl-3">
+        <a class="rk-step d-block" asp-area="Builder" asp-controller="Menu" asp-action="Index">
+            <span class="rk-n">4</span>
+            <h3>Pasang di menu</h3>
+            <p>Tampilkan halamannya di menu samping, lengkap dengan ikon dan folder.</p>
+        </a>
+    </div>
 </div>
