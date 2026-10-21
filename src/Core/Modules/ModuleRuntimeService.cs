@@ -33,6 +33,8 @@ public sealed record ModuleListColumn(string Field, string Label, bool Sortable,
 /// <param name="OrderBy">The sort that was actually applied (canonical field spelling), or null.</param>
 /// <param name="Keys">One raw key text per row (the <c>display.keyField</c> column, invariant culture; null = that row has no key),
 /// only when the module has a Detail, Update or Delete source or a per-row workflow button, and the result has that column. Otherwise null.</param>
+/// <param name="Truncated">The data source does not page (no @Skip / @Take) and had more rows than one call can read
+/// (<see cref="Sql.SqlExecOptions.DefaultMaxRows"/>): the rows after that cannot be reached.</param>
 public sealed record ModuleListResult(
     Module Module,
     IReadOnlyList<ModuleListColumn> Columns,
@@ -43,7 +45,8 @@ public sealed record ModuleListResult(
     bool HasNext,
     string? OrderBy,
     string? Search,
-    IReadOnlyList<string?>? Keys = null);
+    IReadOnlyList<string?>? Keys = null,
+    bool Truncated = false);
 
 public interface IModuleRuntimeService
 {
@@ -173,17 +176,25 @@ public sealed class ModuleRuntimeService(
 
         var list = result.List ?? throw Unavailable(module, "the data source returned no result set at the list position", null);
 
+        // A query or procedure that does not use @Skip / @Take returns every row (up to the executor's cap) on every call: more rows
+        // than asked for, or cut at the cap. Its page is then taken here, so page 2 (and an export's next chunk) are not page 1 again.
+        var unpaged = list.Rows.Count > take || list.Truncated;
+        var pageRows = (unpaged ? list.Rows.Skip(skip) : list.Rows).Take(take).ToList();
+
         var columns = BuildColumns(display.Columns, list.Columns, out var indexes);
-        var rows = list.Rows.Take(take)
+        var rows = pageRows
             .Select(row => (IReadOnlyList<object?>)indexes.Select(i => i >= 0 && i < row.Count ? row[i] : null).ToList())
             .ToList();
 
-        var hasNext = result.TotalCount is { } total ? skip + rows.Count < total : list.Rows.Count >= take;
-        return new ModuleListResult(module, columns, rows, result.TotalCount, skip, take, hasNext, orderBy, search,
-            ReadKeys(module.Config, list, take));
+        var totalCount = result.TotalCount ?? (unpaged && !list.Truncated ? list.Rows.Count : null);
+        var hasNext = totalCount is { } total ? skip + rows.Count < total
+            : unpaged ? list.Rows.Count > skip + rows.Count
+            : list.Rows.Count >= take;
+        return new ModuleListResult(module, columns, rows, totalCount, skip, take, hasNext, orderBy, search,
+            ReadKeys(module.Config, list.Columns, pageRows), Truncated: unpaged && list.Truncated);
     }
 
-    private static List<string?>? ReadKeys(ModuleConfig config, DataTableResult list, int take)
+    private static List<string?>? ReadKeys(ModuleConfig config, IReadOnlyList<string> columns, IReadOnlyList<IReadOnlyList<object?>> pageRows)
     {
         var source = config.Source;
         var keyField = config.Display.KeyField?.Trim();
@@ -191,10 +202,10 @@ public sealed class ModuleRuntimeService(
                         || config.Actions.Any(a => a.PerRow);
         if (string.IsNullOrEmpty(keyField) || !needsKeys) return null;
 
-        var index = IndexOf(list.Columns, keyField);
+        var index = IndexOf(columns, keyField);
         if (index < 0) return null;
 
-        return list.Rows.Take(take)
+        return pageRows
             .Select(row => index < row.Count ? ModuleFieldValue.ToText(row[index]) : null)
             .ToList();
     }

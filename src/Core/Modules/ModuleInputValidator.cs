@@ -618,6 +618,42 @@ public static partial class ModuleInputValidator
         return errors;
     }
 
+    /// <summary>
+    /// Why <paramref name="module"/> could no longer use data source <paramref name="dataSourceId"/> if its statement type became
+    /// <paramref name="kind"/>: the list, Detail and lookups (fields and filters) must be Queries, Insert / Update / Delete Commands.
+    /// Empty when every place the module uses it accepts that type.
+    /// </summary>
+    public static IReadOnlyList<string> StatementKindConflicts(Module module, Guid dataSourceId, StatementType kind)
+    {
+        var config = module.Config;
+        var source = config.Source;
+        var uses = new List<(string Role, StatementType Needs)>();
+        void Use(DataSourceRef? reference, string role, StatementType needs)
+        {
+            if (reference?.DataSourceId == dataSourceId) uses.Add((role, needs));
+        }
+
+        if (module.Type is ModuleType.Table or ModuleType.Chart or ModuleType.Widget) Use(source.List, "List", StatementType.Query);
+        if (module.Type == ModuleType.Table)
+        {
+            Use(source.Detail, "Detail", StatementType.Query);
+            Use(source.Update, "Update", StatementType.Command);
+            Use(source.Delete, "Delete", StatementType.Command);
+            foreach (var filter in config.Display.Filters.Where(f => f.Type == FormFieldType.Select && f.Lookup?.DataSourceId == dataSourceId))
+                uses.Add(($"lookup filter '{filter.Name.Trim()}'", StatementType.Query));
+        }
+        if (module.Type is ModuleType.Table or ModuleType.Form)
+        {
+            Use(source.Insert, "Insert", StatementType.Command);
+            foreach (var field in config.Form.DataFields.Where(f => ModuleFieldValue.IsLookup(f.Type) && f.Lookup?.DataSourceId == dataSourceId))
+                uses.Add(($"lookup field '{field.Name.Trim()}'", StatementType.Query));
+        }
+
+        return uses.Where(u => u.Needs != kind)
+            .Select(u => $"Module '{module.Name}' memakainya sebagai {u.Role}, yang harus berjenis {u.Needs}.")
+            .ToList();
+    }
+
     private static string Shorten(string text) => text.Length <= 30 ? text : text[..30] + "...";
 }
 

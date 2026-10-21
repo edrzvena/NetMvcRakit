@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Rakit.Core;
 using Rakit.Core.Config;
 using Rakit.Core.DataSources;
+using Rakit.Core.Modules;
 using Rakit.Core.Procedures;
 using Rakit.Core.Schema;
 using Rakit.Core.Sql;
@@ -18,6 +19,7 @@ public class DataSourceController(
     IDataSourceService dataSources,
     ISchemaBrowserService schema,
     ISpWhitelistService whitelist,
+    IModuleRepository modules,
     IOptions<RakitDbOptions> options,
     ILogger<DataSourceController> logger) : Controller
 {
@@ -80,7 +82,7 @@ public class DataSourceController(
     public Task<IActionResult> Edit(Guid id, DataSourceFormViewModel model, CancellationToken ct) => GuardAsync(async () =>
     {
         model.Id = id;
-        if (TryBuildInput(model, out var input) && await ProcedureAllowedAsync(input, ct))
+        if (TryBuildInput(model, out var input) && await ProcedureAllowedAsync(input, ct) && await StatementTypeFitsModulesAsync(id, input, ct))
         {
             try
             {
@@ -247,6 +249,24 @@ public class DataSourceController(
         if (await whitelist.IsAllowedAsync(proc.Schema, proc.Name, ct)) return true;
 
         ModelState.AddModelError("", $"Prosedur '{proc.Schema}.{proc.Name}' tidak ada di whitelist atau tidak aktif.");
+        return false;
+    }
+
+    /// <summary>
+    /// A module stores only the data source's id, so changing Query to Command (or back) would break the modules that use it in a
+    /// place that needs the other type (a list or lookup must stay a Query, Insert / Update / Delete a Command).
+    /// </summary>
+    private async Task<bool> StatementTypeFitsModulesAsync(Guid id, DataSourceInput input, CancellationToken ct)
+    {
+        var current = await repository.GetAsync(id, ct);
+        if (current is null || current.StatementType == input.StatementType) return true;
+
+        var conflicts = (await modules.ListUsingDataSourceAsync(id, ct))
+            .SelectMany(m => ModuleInputValidator.StatementKindConflicts(m, id, input.StatementType)).ToList();
+        if (conflicts.Count == 0) return true;
+
+        ModelState.AddModelError("", $"Statement tidak bisa diubah menjadi {input.StatementType}: data source ini masih dipakai module.");
+        foreach (var c in conflicts) ModelState.AddModelError("", c);
         return false;
     }
 

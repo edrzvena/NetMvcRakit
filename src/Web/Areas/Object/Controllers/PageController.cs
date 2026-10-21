@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Html;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
@@ -158,7 +159,7 @@ public class PageController(
     [HttpGet("{moduleId:guid}/record/{key}/view")]
     public Task<IActionResult> RecordView(Guid moduleId, string key, CancellationToken ct) => RecordAsync(async () =>
     {
-        var items = await records.ViewAsync(moduleId, key, await HttpParameterContext.FromAsync(HttpContext, ct), ct);
+        var items = await records.ViewAsync(moduleId, KeySegment(key, 2), await HttpParameterContext.FromAsync(HttpContext, ct), ct);
         return Json(new ObjectRecordView(items.Select(i => new ObjectViewItem(i.Label, i.Text, i.IsSection)).ToList()));
     });
 
@@ -207,7 +208,7 @@ public class PageController(
     [HttpGet("{moduleId:guid}/record/{key}")]
     public Task<IActionResult> RecordDetail(Guid moduleId, string key, CancellationToken ct) => RecordAsync(async () =>
     {
-        var values = await records.GetAsync(moduleId, key, await HttpParameterContext.FromAsync(HttpContext, ct), ct);
+        var values = await records.GetAsync(moduleId, KeySegment(key, 1), await HttpParameterContext.FromAsync(HttpContext, ct), ct);
         return Json(new ObjectRecord(values));
     });
 
@@ -223,14 +224,14 @@ public class PageController(
     public Task<IActionResult> RecordUpdate(Guid moduleId, string key, CancellationToken ct) => RecordAsync(async () =>
     {
         var context = await HttpParameterContext.FromAsync(HttpContext, ct);
-        await records.UpdateAsync(moduleId, key, context.Form, context, ct);
+        await records.UpdateAsync(moduleId, KeySegment(key, 1), context.Form, context, ct);
         return Json(new ObjectDone("Data disimpan."));
     });
 
     [HttpPost("{moduleId:guid}/record/{key}/delete"), ValidateAntiForgeryToken, RequestSizeLimit(MaxWriteBodyBytes)]
     public Task<IActionResult> RecordDelete(Guid moduleId, string key, CancellationToken ct) => RecordAsync(async () =>
     {
-        await records.DeleteAsync(moduleId, key, await HttpParameterContext.FromAsync(HttpContext, ct), ct);
+        await records.DeleteAsync(moduleId, KeySegment(key, 2), await HttpParameterContext.FromAsync(HttpContext, ct), ct);
         return Json(new ObjectDone("Data dihapus."));
     });
 
@@ -244,7 +245,7 @@ public class PageController(
     public Task<IActionResult> RunAction(Guid moduleId, string code, CancellationToken ct) => RunActionAsync(moduleId, code, null, ct);
 
     [HttpPost("{moduleId:guid}/action/{code}/{key}"), ValidateAntiForgeryToken, RequestSizeLimit(MaxWriteBodyBytes)]
-    public Task<IActionResult> RunRowAction(Guid moduleId, string code, string key, CancellationToken ct) => RunActionAsync(moduleId, code, key, ct);
+    public Task<IActionResult> RunRowAction(Guid moduleId, string code, string key, CancellationToken ct) => RunActionAsync(moduleId, code, KeySegment(key, 1), ct);
 
     private Task<IActionResult> RunActionAsync(Guid moduleId, string code, string? key, CancellationToken ct) => RecordAsync(async () =>
     {
@@ -370,6 +371,20 @@ public class PageController(
     {
         Response.StatusCode = status;
         return Json(new ObjectError(message));
+    }
+
+    /// <summary>
+    /// The record key as the browser sent it. Routing decodes every escape of a path segment except %2F, so a key with a '/'
+    /// (encodeURIComponent makes it %2F) would reach the action as "a%2Fb". Such a key is read again from the raw request target,
+    /// <paramref name="fromEnd"/> segments from the end of the path, and unescaped once.
+    /// </summary>
+    private string KeySegment(string routed, int fromEnd)
+    {
+        if (!routed.Contains('%')) return routed;
+        var raw = HttpContext.Features.Get<IHttpRequestFeature>()?.RawTarget;
+        if (string.IsNullOrEmpty(raw)) return routed;
+        var segments = raw.Split('?', 2)[0].Split('/');
+        return segments.Length > fromEnd ? Uri.UnescapeDataString(segments[^fromEnd]) : routed;
     }
 
     /// <summary>Control values come from a URL: anything that is not a plain integer counts as "not given".</summary>

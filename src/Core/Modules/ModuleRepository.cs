@@ -170,6 +170,20 @@ SELECT (SELECT COUNT(*) FROM rakit.Menus WITH (UPDLOCK, HOLDLOCK) WHERE ModuleId
         await tx.CommitAsync(ct);
     }
 
+    public async Task<IReadOnlyList<Module>> ListUsingDataSourceAsync(Guid dataSourceId, CancellationToken ct = default)
+    {
+        await using var conn = await connections.CreateMetadataAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        // the id is stored as a JSON string, so the quoted id is looked for in the JSON text (like the data source delete guard)
+        cmd.CommandText = $"SELECT {SelectColumns} FROM rakit.Modules WHERE IsDeleted = 0 AND LOWER(Config) LIKE @pattern ORDER BY Name";
+        cmd.Parameters.Add(new SqlParameter("@pattern", SqlDbType.NVarChar, 50) { Value = "%\"" + dataSourceId.ToString("D") + "\"%" });
+
+        var result = new List<Module>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct)) result.Add(Read(reader));
+        return result;
+    }
+
     // ---- helpers -------------------------------------------------------------------------------
 
     private static void EnsureValid(ModuleInput input)
@@ -217,13 +231,15 @@ SELECT (SELECT COUNT(*) FROM rakit.Menus WITH (UPDLOCK, HOLDLOCK) WHERE ModuleId
         cmd.Parameters.Add(new SqlParameter("@id", SqlDbType.UniqueIdentifier) { Value = id });
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
-        if (!await reader.ReadAsync(ct)) return null;
-        return new Module(
-            reader.GetGuid(0), reader.GetString(1), ModuleJson.TypeFromColumn(reader.GetString(2)),
-            reader.IsDBNull(3) ? null : reader.GetString(3),
-            ModuleJson.StatusFromColumn(reader.GetString(4)),
-            reader.IsDBNull(5) ? null : reader.GetGuid(5),
-            ModuleJson.Deserialize(reader.GetString(6)),
-            reader.GetDateTime(7), reader.IsDBNull(8) ? null : reader.GetDateTime(8));
+        return await reader.ReadAsync(ct) ? Read(reader) : null;
     }
+
+    /// <summary>One row of <see cref="SelectColumns"/>.</summary>
+    private static Module Read(SqlDataReader reader) => new(
+        reader.GetGuid(0), reader.GetString(1), ModuleJson.TypeFromColumn(reader.GetString(2)),
+        reader.IsDBNull(3) ? null : reader.GetString(3),
+        ModuleJson.StatusFromColumn(reader.GetString(4)),
+        reader.IsDBNull(5) ? null : reader.GetGuid(5),
+        ModuleJson.Deserialize(reader.GetString(6)),
+        reader.GetDateTime(7), reader.IsDBNull(8) ? null : reader.GetDateTime(8));
 }

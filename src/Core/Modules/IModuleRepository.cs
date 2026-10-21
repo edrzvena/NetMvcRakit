@@ -25,10 +25,13 @@ public interface IModuleRepository
     /// <exception cref="ModuleNotFoundException"/>
     Task<Module> CopyAsync(Guid id, string user, CancellationToken ct = default);
 
-    /// <summary>Soft delete. Refused while a (non-deleted) menu item still points at the module.</summary>
+    /// <summary>Soft delete. Refused while a (non-deleted) menu item, a Page module that embeds it, or a workflow's Module step still points at the module.</summary>
     /// <exception cref="ModuleNotFoundException"/>
     /// <exception cref="ModuleInUseException"/>
     Task DeleteAsync(Guid id, string user, CancellationToken ct = default);
+
+    /// <summary>The (non-deleted) modules whose configuration mentions the data source anywhere (list, record actions, lookups).</summary>
+    Task<IReadOnlyList<Module>> ListUsingDataSourceAsync(Guid dataSourceId, CancellationToken ct = default);
 }
 
 public interface IModuleGroupRepository

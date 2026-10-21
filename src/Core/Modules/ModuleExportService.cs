@@ -47,6 +47,7 @@ public sealed class ModuleExportService(IModuleRuntimeService runtime) : IModule
             var page = await runtime.GetListAsync(module, context, request with { Export = true }, ct);
             columns = page.Columns;
             rows.AddRange(page.Rows);
+            truncated = page.Truncated && !page.HasNext;
         }
         else
         {
@@ -62,12 +63,14 @@ public sealed class ModuleExportService(IModuleRuntimeService runtime) : IModule
                 skip += chunk.Rows.Count;
                 if (rows.Count >= ModuleExport.MaxRows)
                 {
-                    truncated = chunk.HasNext || rows.Count > ModuleExport.MaxRows;
+                    truncated = chunk.HasNext || rows.Count > ModuleExport.MaxRows || chunk.Truncated;
                     rows.RemoveRange(ModuleExport.MaxRows, rows.Count - ModuleExport.MaxRows);
                     break;
                 }
             }
             while (chunk.HasNext && chunk.Rows.Count > 0);
+            // a data source that does not page stops at the rows one call can read
+            truncated |= chunk.Truncated && !chunk.HasNext;
         }
 
         var csv = ModuleCsv.Write(
