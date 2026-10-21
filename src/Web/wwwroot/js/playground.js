@@ -409,7 +409,8 @@
         return el('pre', { class: 'pg-messages mb-0' }, [document.createTextNode(messages.map((m) => m.text).join('\n'))]);
     }
 
-    // Every result set is shown as JSON first (an array of objects, one per row) and as a table on request.
+    // Every result set is shown as JSON (an array of objects, one per row) or as a table; the last choice is remembered.
+    const VIEW_KEY = 'rakit-pg-view';
     const NUMERIC_TYPES = new Set(['tinyint', 'smallint', 'int', 'bigint', 'decimal', 'numeric', 'float', 'real', 'money', 'smallmoney']);
 
     // A double keeps about 15 significant digits: a bigint past 2^53 or a long decimal written as a bare number would be
@@ -434,8 +435,28 @@
         return JSON.stringify(value);
     }
 
-    function toJsonText(set) {
-        if (set.rows.length === 0) return '[]';
+    // The server cuts long cells (PlaygroundValueFormatter: text past 2000 characters gets '…', binary past 32 bytes gets
+    // '… (n byte)'), and both marks are exact, so a cut cell can be recognised here
+    const MAX_CELL_LENGTH = 2000;
+    const BINARY_TYPES = new Set(['binary', 'varbinary', 'image', 'timestamp', 'rowversion']);
+
+    function countCutCells(set) {
+        const binary = set.columns.map((c) => BINARY_TYPES.has(String(c.type || '').split('(')[0].trim().toLowerCase()));
+        let count = 0;
+        set.rows.forEach((row) => row.forEach((v, i) => {
+            if (v === null) return;
+            if (binary[i] ? /^0x[0-9A-F]*… \(\d+ byte\)$/.test(v) : v.length === MAX_CELL_LENGTH + 1 && v.endsWith('…')) count++;
+        }));
+        return count;
+    }
+
+    /**
+     * A complete result is a plain array. A partial one (rows past the limit, or cut cells) is wrapped in an object that says
+     * so, because a copied or downloaded file otherwise looks like the whole, exact data.
+     */
+    function toJsonText(set, cutCells) {
+        const partial = set.truncated || cutCells > 0;
+        const pad = partial ? '    ' : '  ';
         // a repeated column name would overwrite the first one, and the suffix itself may already be taken (x, x, x_2)
         const used = new Set();
         const keys = set.columns.map((c, i) => {
@@ -445,27 +466,35 @@
             used.add(key);
             return key;
         });
-        const rows = set.rows.map((row) => '  {\n' + row.map((v, i) => '    ' + JSON.stringify(keys[i]) + ': ' + jsonLiteral(set.columns[i].type, v)).join(',\n') + '\n  }');
-        return '[\n' + rows.join(',\n') + '\n]';
+        const rows = set.rows.map((row) => pad + '{\n' + row.map((v, i) => pad + '  ' + JSON.stringify(keys[i]) + ': ' + jsonLiteral(set.columns[i].type, v)).join(',\n') + '\n' + pad + '}');
+        const array = rows.length === 0 ? '[]' : '[\n' + rows.join(',\n') + '\n' + pad.slice(2) + ']';
+        if (!partial) return array;
+        return '{\n  "dipotong": true,\n  "totalBaris": ' + set.totalRows + ',\n  "barisDitampilkan": ' + set.rows.length
+            + ',\n  "selDipotong": ' + cutCells + ',\n  "baris": ' + array + '\n}';
     }
 
     function renderGrid(set) {
-        const json = toJsonText(set);
-        let mode = 'json';
+        const cutCells = countCutCells(set);
+        const json = toJsonText(set, cutCells);
+        const partial = set.truncated || cutCells > 0;
+        let mode = store.get(VIEW_KEY) === 'table' ? 'table' : 'json';
 
         const tools = el('div', { class: 'd-flex flex-wrap align-items-center gap-2 mb-1 small' });
         tools.appendChild(el('span', { class: 'text-muted', text: set.truncated
             ? 'Menampilkan ' + number(set.rows.length) + ' dari ' + number(set.totalRows) + ' baris'
             : number(set.rows.length) + ' baris' }));
         if (set.truncated) tools.appendChild(el('span', { class: 'badge text-bg-warning', text: 'dipotong' }));
+        if (cutCells > 0) tools.appendChild(el('span', { class: 'badge text-bg-warning', text: number(cutCells) + ' sel dipotong',
+            title: 'Teks lebih dari ' + number(MAX_CELL_LENGTH) + ' karakter dan biner lebih dari 32 byte ditampilkan terpotong.' }));
 
-        const jsonButton = el('button', { type: 'button', class: 'btn btn-sm btn-primary py-0', 'aria-pressed': 'true', text: 'JSON' });
-        const tableButton = el('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary py-0', 'aria-pressed': 'false', text: 'Tabel' });
+        // the colour classes (btn-primary / btn-outline-secondary) are set by show()
+        const jsonButton = el('button', { type: 'button', class: 'btn btn-sm py-0', text: 'JSON' });
+        const tableButton = el('button', { type: 'button', class: 'btn btn-sm py-0', text: 'Tabel' });
         const toggle = el('div', { class: 'btn-group btn-group-sm ms-2', role: 'group', 'aria-label': 'Tampilan hasil' }, [jsonButton, tableButton]);
 
         const copy = el('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary py-0 ms-auto' }, [icon('bi-clipboard'), ' Salin']);
-        const download = el('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary py-0' }, [icon('bi-download'), ' .json']);
-        tools.append(toggle, copy, download);
+        const downloadButton = el('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary py-0' });
+        tools.append(toggle, copy, downloadButton);
 
         const jsonView = el('pre', { class: 'pg-json mb-0', tabindex: '0', 'aria-label': 'Hasil dalam JSON' }, [document.createTextNode(json)]);
         // The table is built on the first switch to Tabel: building it next to the JSON doubled the work for up to 5000 rows per set
@@ -488,23 +517,28 @@
             if (!asJson && !gridBuilt) buildGrid();
             jsonView.classList.toggle('d-none', !asJson);
             wrap.classList.toggle('d-none', asJson);
-            jsonButton.className = 'btn btn-sm py-0 ' + (asJson ? 'btn-primary' : 'btn-outline-secondary');
-            tableButton.className = 'btn btn-sm py-0 ' + (asJson ? 'btn-outline-secondary' : 'btn-primary');
-            jsonButton.setAttribute('aria-pressed', asJson ? 'true' : 'false');
-            tableButton.setAttribute('aria-pressed', asJson ? 'false' : 'true');
-            download.replaceChildren(icon('bi-download'), asJson ? ' .json' : ' .csv');
+            [[jsonButton, asJson], [tableButton, !asJson]].forEach(([button, on]) => {
+                button.classList.toggle('btn-primary', on);
+                button.classList.toggle('btn-outline-secondary', !on);
+                button.setAttribute('aria-pressed', on ? 'true' : 'false');
+            });
+            downloadButton.replaceChildren(icon('bi-download'), asJson ? ' .json' : ' .csv');
         }
-        jsonButton.addEventListener('click', () => show('json'));
-        tableButton.addEventListener('click', () => show('table'));
+        const choose = (next) => { store.set(VIEW_KEY, next); show(next); };
+        jsonButton.addEventListener('click', () => choose('json'));
+        tableButton.addEventListener('click', () => choose('table'));
+        show(mode);
 
         // Salin and the download follow the view that is showing: JSON as it is, the table as tab-separated text / CSV
         copy.addEventListener('click', async () => {
             try { await navigator.clipboard.writeText(mode === 'json' ? json : toDelimited(set, '\t')); copy.replaceChildren(icon('bi-clipboard-check'), ' Tersalin'); } catch (e) { copy.textContent = 'Gagal'; }
             setTimeout(() => copy.replaceChildren(icon('bi-clipboard'), ' Salin'), 1200);
         });
-        download.addEventListener('click', () => {
-            if (mode === 'json') download_('hasil.json', json, 'application/json');
-            else download_('hasil.csv', toDelimited(set, ',', true), 'text/csv');
+        // a CSV has no room to say it is partial, so the file name says it (for both formats)
+        downloadButton.addEventListener('click', () => {
+            const name = partial ? 'hasil-sebagian' : 'hasil';
+            if (mode === 'json') download(name + '.json', json, 'application/json', false);
+            else download(name + '.csv', toDelimited(set, ',', true), 'text/csv', true);
         });
 
         return el('div', {}, [tools, jsonView, wrap]);
@@ -521,8 +555,9 @@
         return lines.join('\r\n');
     }
 
-    function download_(name, text, type) {
-        const url = URL.createObjectURL(new Blob([(type === 'text/csv' ? '﻿' : '') + text], { type: type + ';charset=utf-8' }));
+    /** Saves text as a file. bom adds a UTF-8 byte order mark, which Excel needs to read a CSV's non-ASCII text correctly. */
+    function download(name, text, type, bom) {
+        const url = URL.createObjectURL(new Blob([(bom ? '﻿' : '') + text], { type: type + ';charset=utf-8' }));
         const link = el('a', { href: url, download: name });
         document.body.appendChild(link);
         link.click();
