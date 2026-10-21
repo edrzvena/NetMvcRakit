@@ -412,34 +412,44 @@
     // Every result set is shown as JSON first (an array of objects, one per row) and as a table on request.
     const NUMERIC_TYPES = new Set(['tinyint', 'smallint', 'int', 'bigint', 'decimal', 'numeric', 'float', 'real', 'money', 'smallmoney']);
 
+    // A double keeps about 15 significant digits: a bigint past 2^53 or a long decimal written as a bare number would be
+    // silently rounded by whoever parses the JSON, so those stay strings
+    const MAX_SAFE_DIGITS = 15;
+
+    function isSafeNumber(base, value) {
+        if (!/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(value)) return false;
+        if (base === 'float' || base === 'real') return true; // already a double on the server
+        let digits = value.replace(/^-/, '');
+        if (digits.includes('.')) digits = digits.replace(/0+$/, '');
+        digits = digits.replace('.', '').replace(/^0+/, '');
+        return digits.length <= MAX_SAFE_DIGITS;
+    }
+
     /** The cell as a JSON literal: numbers and bits by their column type, null as null, everything else as a string. */
     function jsonLiteral(type, value) {
         if (value === null) return 'null';
         const base = String(type || '').split('(')[0].trim().toLowerCase();
         if (base === 'bit' && (value === 'true' || value === 'false')) return value;
-        if (NUMERIC_TYPES.has(base) && /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(value)) return value;
+        if (NUMERIC_TYPES.has(base) && isSafeNumber(base, value)) return value;
         return JSON.stringify(value);
     }
 
     function toJsonText(set) {
         if (set.rows.length === 0) return '[]';
-        const seen = new Map();
+        // a repeated column name would overwrite the first one, and the suffix itself may already be taken (x, x, x_2)
+        const used = new Set();
         const keys = set.columns.map((c, i) => {
             const name = c.name || '(kolom ' + (i + 1) + ')';
-            const count = (seen.get(name) || 0) + 1;
-            seen.set(name, count);
-            return count > 1 ? name + '_' + count : name; // a repeated column name would overwrite the first one
+            let key = name;
+            for (let n = 2; used.has(key); n++) key = name + '_' + n;
+            used.add(key);
+            return key;
         });
         const rows = set.rows.map((row) => '  {\n' + row.map((v, i) => '    ' + JSON.stringify(keys[i]) + ': ' + jsonLiteral(set.columns[i].type, v)).join(',\n') + '\n  }');
         return '[\n' + rows.join(',\n') + '\n]';
     }
 
     function renderGrid(set) {
-        const head = el('tr', {}, [el('th', { class: 'pg-rownum', text: '#' })].concat(
-            set.columns.map((c, i) => el('th', { text: c.name || '(kolom ' + (i + 1) + ')', title: c.type }))));
-        const body = set.rows.map((row, r) => el('tr', {}, [el('td', { class: 'pg-rownum text-muted', text: r + 1 })].concat(
-            row.map((v) => (v === null ? nullCell() : el('td', { text: v }))))));
-
         const json = toJsonText(set);
         let mode = 'json';
 
@@ -458,14 +468,24 @@
         tools.append(toggle, copy, download);
 
         const jsonView = el('pre', { class: 'pg-json mb-0', tabindex: '0', 'aria-label': 'Hasil dalam JSON' }, [document.createTextNode(json)]);
-        const wrap = el('div', { class: 'pg-grid d-none' }, [
-            el('table', { class: 'table table-sm table-bordered table-hover mb-0' }, [el('thead', {}, [head]), el('tbody', {}, body)]),
-        ]);
-        if (set.rows.length === 0) wrap.appendChild(el('div', { class: 'text-muted small p-2', text: 'Tidak ada baris.' }));
+        // The table is built on the first switch to Tabel: building it next to the JSON doubled the work for up to 5000 rows per set
+        const wrap = el('div', { class: 'pg-grid d-none' });
+        let gridBuilt = false;
+
+        function buildGrid() {
+            const head = el('tr', {}, [el('th', { class: 'pg-rownum', text: '#' })].concat(
+                set.columns.map((c, i) => el('th', { text: c.name || '(kolom ' + (i + 1) + ')', title: c.type }))));
+            const body = set.rows.map((row, r) => el('tr', {}, [el('td', { class: 'pg-rownum text-muted', text: r + 1 })].concat(
+                row.map((v) => (v === null ? nullCell() : el('td', { text: v }))))));
+            wrap.appendChild(el('table', { class: 'table table-sm table-bordered table-hover mb-0' }, [el('thead', {}, [head]), el('tbody', {}, body)]));
+            if (set.rows.length === 0) wrap.appendChild(el('div', { class: 'text-muted small p-2', text: 'Tidak ada baris.' }));
+            gridBuilt = true;
+        }
 
         function show(next) {
             mode = next;
             const asJson = mode === 'json';
+            if (!asJson && !gridBuilt) buildGrid();
             jsonView.classList.toggle('d-none', !asJson);
             wrap.classList.toggle('d-none', asJson);
             jsonButton.className = 'btn btn-sm py-0 ' + (asJson ? 'btn-primary' : 'btn-outline-secondary');
