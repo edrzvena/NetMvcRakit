@@ -81,6 +81,9 @@ public static partial class WorkflowInputValidator
 
             if (!StepCodePattern().IsMatch(code))
                 errors.Add($"{label}: kode harus 1-{WorkflowStep.MaxCodeLength} karakter, huruf/angka/'_', diawali huruf.");
+            else if (WorkflowTemplate.Roots.Contains(code, StringComparer.OrdinalIgnoreCase))
+                // {{form.row.Id}} would read the form field "row.Id", never this step's output
+                errors.Add($"{label}: kode '{code}' sudah dipakai placeholder ({string.Join(", ", WorkflowTemplate.Roots)}); pilih kode lain.");
             else if (!seen.Add(code))
                 errors.Add($"{label}: kode dipakai lebih dari sekali.");
 

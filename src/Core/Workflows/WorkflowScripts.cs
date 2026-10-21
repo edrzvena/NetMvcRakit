@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Jint;
 using Jint.Runtime;
 using Microsoft.Extensions.Options;
@@ -59,10 +60,13 @@ public sealed class JintScriptEngine(IOptions<WorkflowOptions> options) : IWorkf
 
         try
         {
+            var timeout = TimeSpan.FromMilliseconds(Math.Clamp(limits.TimeoutMs, 10, ScriptOptions.MaxTimeoutMs));
             var engine = new Engine(o =>
             {
                 o.Strict();
-                o.TimeoutInterval(TimeSpan.FromMilliseconds(Math.Clamp(limits.TimeoutMs, 10, ScriptOptions.MaxTimeoutMs)));
+                o.TimeoutInterval(timeout);
+                // the timeout above is checked between statements, so one slow regex would run on for Jint's own 10 seconds
+                o.Constraints.RegexTimeout = timeout;
                 o.LimitMemory(Math.Clamp(limits.MemoryLimitMb, 1, ScriptOptions.MaxMemoryMb) * 1024L * 1024L);
                 o.MaxStatements(Math.Max(1_000, limits.MaxStatements));
                 o.LimitRecursion(Math.Clamp(limits.MaxRecursion, 5, 1_000));
@@ -131,6 +135,7 @@ public sealed class JintScriptEngine(IOptions<WorkflowOptions> options) : IWorkf
 
     private static string LimitDetail(Exception ex) => ex switch
     {
+        RegexMatchTimeoutException => "Ekspresi reguler (regex) melebihi batas waktu.", // a TimeoutException too, so it goes first
         TimeoutException => "Melebihi batas waktu.",
         MemoryLimitExceededException => "Melebihi batas memori.",
         StatementsCountOverflowException => "Melebihi batas jumlah pernyataan.",

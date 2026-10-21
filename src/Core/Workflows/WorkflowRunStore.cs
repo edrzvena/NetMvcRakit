@@ -1,4 +1,5 @@
 using System.Data;
+using System.Globalization;
 using Microsoft.Data.SqlClient;
 using Rakit.Core.Data;
 
@@ -10,15 +11,82 @@ namespace Rakit.Core.Workflows;
 public sealed record PendingRun(
     Guid RunId, Guid WorkflowId, Guid? ModuleId, string? ActionCode, string StepCode, string State, DateTime Expires);
 
-/// <summary>What a paused run needs to go on: the form and key it started with, the claims, the clock and the outputs so far (as text).</summary>
+/// <summary>What a paused run needs to go on: the form and key it started with, the claims, the clock and the outputs so far.</summary>
 public sealed class WorkflowRunState
 {
     public Dictionary<string, string?> Form { get; set; } = [];
     public string? Key { get; set; }
     public Dictionary<string, string?> Claims { get; set; } = [];
     public DateTimeOffset Now { get; set; }
+
+    /// <summary>The outputs with their type, so the steps after the Action get the same values (a datetime2 to the tick, binary as bytes).</summary>
+    public Dictionary<string, StoredValue> Values { get; set; } = [];
+
+    /// <summary>The outputs as text: what runs saved before <see cref="Values"/> existed hold; read only when <see cref="Values"/> is empty.</summary>
     public Dictionary<string, string?> Outputs { get; set; } = [];
+
     public string? RunBy { get; set; }
+}
+
+/// <summary>A step output written so that it reads back as the same .NET value (round-trip formats, invariant culture).</summary>
+public sealed class StoredValue
+{
+    public string Type { get; set; } = "string";
+    public string? Text { get; set; }
+
+    public static StoredValue From(object? value)
+    {
+        var c = CultureInfo.InvariantCulture;
+        return value switch
+        {
+            null or DBNull => new StoredValue { Type = "null" },
+            string s => new StoredValue { Text = s },
+            bool b => new StoredValue { Type = "bool", Text = b ? "true" : "false" },
+            byte n => new StoredValue { Type = "byte", Text = n.ToString(c) },
+            short n => new StoredValue { Type = "int16", Text = n.ToString(c) },
+            int n => new StoredValue { Type = "int32", Text = n.ToString(c) },
+            long n => new StoredValue { Type = "int64", Text = n.ToString(c) },
+            decimal n => new StoredValue { Type = "decimal", Text = n.ToString(c) },
+            double n => new StoredValue { Type = "double", Text = n.ToString("R", c) },
+            float n => new StoredValue { Type = "single", Text = n.ToString("R", c) },
+            DateTime d => new StoredValue { Type = "datetime", Text = d.ToString("O", c) },
+            DateTimeOffset d => new StoredValue { Type = "datetimeoffset", Text = d.ToString("O", c) },
+            TimeSpan t => new StoredValue { Type = "timespan", Text = t.ToString("c", c) },
+            Guid g => new StoredValue { Type = "guid", Text = g.ToString("D") },
+            byte[] bytes => new StoredValue { Type = "bytes", Text = Convert.ToBase64String(bytes) },
+            _ => new StoredValue { Text = WorkflowValues.ToText(value) },
+        };
+    }
+
+    public object? ToValue()
+    {
+        if (Type == "null" || Text is null) return null;
+        var c = CultureInfo.InvariantCulture;
+        try
+        {
+            return Type switch
+            {
+                "bool" => Text == "true",
+                "byte" => byte.Parse(Text, c),
+                "int16" => short.Parse(Text, c),
+                "int32" => int.Parse(Text, c),
+                "int64" => long.Parse(Text, c),
+                "decimal" => decimal.Parse(Text, NumberStyles.Number, c),
+                "double" => double.Parse(Text, NumberStyles.Float, c),
+                "single" => float.Parse(Text, NumberStyles.Float, c),
+                "datetime" => DateTime.Parse(Text, c, DateTimeStyles.RoundtripKind),
+                "datetimeoffset" => DateTimeOffset.Parse(Text, c, DateTimeStyles.RoundtripKind),
+                "timespan" => TimeSpan.ParseExact(Text, "c", c),
+                "guid" => Guid.Parse(Text),
+                "bytes" => Convert.FromBase64String(Text),
+                _ => Text,
+            };
+        }
+        catch (FormatException)
+        {
+            return Text; // written by this class, so only a hand-edited row ends up here
+        }
+    }
 }
 
 public interface IWorkflowRunStore

@@ -148,9 +148,11 @@ public class WorkflowController(
     public Task<IActionResult> Edit(Guid id, WorkflowFormViewModel model, CancellationToken ct) => GuardAsync(async () =>
     {
         model.Id = id;
-        if (await workflows.GetAsync(id, ct) is null) return NotFound();
+        var existing = await workflows.GetAsync(id, ct);
+        if (existing is null) return NotFound();
 
         var input = ToInput(model);
+        if (input is not null && existing.Status == WorkflowStatus.Published && !await PassesLiveCheckAsync(input, ct)) input = null;
         if (input is not null)
         {
             try
@@ -269,6 +271,23 @@ public class WorkflowController(
             ModelState.AddModelError("", "Daftar langkah tidak dapat dibaca. Muat ulang halaman lalu coba lagi.");
             return null;
         }
+    }
+
+    /// <summary>
+    /// A published workflow is live, so saving it must pass the same checks as <see cref="Publish"/>; otherwise an edit could put
+    /// a missing data source or a placeholder without a source step in front of visitors. Structural errors are left to the
+    /// repository (it reports them the usual way).
+    /// </summary>
+    private async Task<bool> PassesLiveCheckAsync(WorkflowInput input, CancellationToken ct)
+    {
+        if (WorkflowInputValidator.Validate(input).Count > 0) return true;
+
+        var errors = (await checker.CheckAsync(input.Steps, input.Transaction, ct)).Where(i => i.IsError).ToList();
+        if (errors.Count == 0) return true;
+
+        ModelState.AddModelError("", "Workflow ini sudah dipublikasikan, jadi perubahan hanya disimpan bila lolos pemeriksaan yang sama dengan Publish. Perbaiki dulu, atau kembalikan ke draft (Unpublish):");
+        foreach (var issue in errors) ModelState.AddModelError("", issue.Message);
+        return false;
     }
 
     /// <summary>Exception filter used for its side effect: turns expected failures into form errors.</summary>

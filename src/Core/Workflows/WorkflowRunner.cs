@@ -140,7 +140,10 @@ public sealed class WorkflowRunner(
 
         var state = WorkflowJson.DeserializeData<WorkflowRunState>(pending.State) ?? new WorkflowRunState();
         var values = new WorkflowValues(state.Form, state.Key, state.Claims, state.Now);
-        foreach (var (key, value) in state.Outputs) values.Outputs[key] = value;
+        if (state.Values.Count > 0)
+            foreach (var (key, value) in state.Values) values.Outputs[key] = value.ToValue();
+        else
+            foreach (var (key, value) in state.Outputs) values.Outputs[key] = value; // a run saved before the typed values existed
         values.Outputs[step.Code + ".button"] = button.Code.Trim();
         foreach (var (name, value) in form) values.Outputs[step.Code + ".form." + name] = value;
 
@@ -296,9 +299,12 @@ public sealed class WorkflowRunner(
 
     private async Task WriteTrackingAsync(Workflow workflow, Guid runId, WorkflowRunContext context, IReadOnlyList<Record> records)
     {
-        var tracking = records.Select(r => new TrackingEntry(
+        // One clock reading plus one tick (datetime2's unit) per row, in step order: the rows of a run are listed by Created, and
+        // two readings of the clock often give the same tick, which left the order to the random Id.
+        var start = DateTime.UtcNow;
+        var tracking = records.Select((r, i) => new TrackingEntry(
             Guid.NewGuid(), runId, workflow.Id, r.Step.Code, r.Step.DisplayName, r.Status, r.Text, r.Ms, context.ModuleId,
-            context.ActionCode, context.RunBy, DateTime.UtcNow)).ToList();
+            context.ActionCode, context.RunBy, start.AddTicks(i))).ToList();
         try
         {
             await workflows.AddTrackingAsync(tracking, CancellationToken.None);
@@ -322,7 +328,7 @@ public sealed class WorkflowRunner(
             Form = new Dictionary<string, string?>(values.Form), Key = values.Key, Claims = new Dictionary<string, string?>(values.Claims),
             Now = values.Now, RunBy = context.RunBy,
         };
-        foreach (var (key, value) in values.Outputs) state.Outputs[key] = WorkflowValues.ToText(value);
+        foreach (var (key, value) in values.Outputs) state.Values[key] = StoredValue.From(value);
 
         try
         {
@@ -447,7 +453,7 @@ public sealed class WorkflowRunner(
         var contentType = string.IsNullOrWhiteSpace(config.ContentType) ? "application/json" : config.ContentType.Trim();
         var body = string.IsNullOrEmpty(config.Body)
             ? null
-            : WorkflowTemplate.Expand(config.Body, values.Get, contentType.Contains("json", StringComparison.OrdinalIgnoreCase) ? WorkflowTemplate.JsonEscape : null);
+            : WorkflowTemplate.Expand(config.Body, values.Get, WorkflowTemplate.BodyEncoder(contentType));
 
         RestResponse response;
         try

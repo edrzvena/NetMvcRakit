@@ -859,7 +859,7 @@
                 panel.appendChild(field('URL', input(r, 'url', { maxlength: '2000', placeholder: 'https://api.contoh.com/pelanggan/{{key}}' }),
                     'Skema dan host harus ditulis lengkap dan terdaftar di Rakit:Workflow:AllowedHosts; {{…}} hanya di path/query.'));
                 panel.appendChild(field('Header (satu per baris)', textarea(r, 'headersText', 3, { placeholder: 'Authorization: Bearer …\nX-Contoh: {{form.Nama}}' })));
-                panel.appendChild(field('Body', textarea(r, 'body', 4, { placeholder: '{"nama": "{{form.Nama}}"}' }), 'Tidak dipakai oleh GET. Nilai {{…}} di-escape otomatis bila content type JSON.'));
+                panel.appendChild(field('Body', textarea(r, 'body', 4, { placeholder: '{"nama": "{{form.Nama}}"}' }), 'Tidak dipakai oleh GET. Nilai {{…}} di-escape otomatis sesuai content type: JSON, form-urlencoded, atau XML (teks biasa apa adanya).'));
                 panel.appendChild(field('Content type (opsional)', input(r, 'contentType', { placeholder: 'application/json' })));
                 panel.appendChild(el('div', { class: 'row g-2' }, [
                     el('div', { class: 'col-6' }, [field('Timeout (detik)', input(r, 'timeoutSeconds', { type: 'number', min: '1', max: '60' }))]),

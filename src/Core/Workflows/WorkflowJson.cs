@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Rakit.Core.Modules;
 
 namespace Rakit.Core.Workflows;
 
@@ -15,11 +16,30 @@ public static class WorkflowJson
     public static string SerializeStep(WorkflowStep step) => JsonSerializer.Serialize(step, Options);
 
     public static WorkflowStep DeserializeStep(string json)
-        => JsonSerializer.Deserialize<WorkflowStep>(json, Options) ?? new WorkflowStep();
+        => Repair(JsonSerializer.Deserialize<WorkflowStep>(json, Options) ?? new WorkflowStep());
 
     /// <summary>The step list a builder form posts as one JSON field. Throws <see cref="JsonException"/> on unreadable text.</summary>
     public static List<WorkflowStep> DeserializeSteps(string? json)
-        => string.IsNullOrWhiteSpace(json) ? [] : JsonSerializer.Deserialize<List<WorkflowStep>>(json, Options) ?? [];
+        => string.IsNullOrWhiteSpace(json)
+            ? []
+            : (JsonSerializer.Deserialize<List<WorkflowStep?>>(json, Options) ?? []).OfType<WorkflowStep>().Select(Repair).ToList();
+
+    /// <summary>
+    /// JSON may say null where the model has a list or a code ("headers": null, a null step or button); the validator, the checker
+    /// and the runner count on them being there, so a null list becomes empty and null items are dropped.
+    /// </summary>
+    private static WorkflowStep Repair(WorkflowStep step)
+    {
+        step.Code ??= "";
+        if (step.Rest is { } rest) rest.Headers = rest.Headers?.OfType<NameValue>().ToList() ?? [];
+        if (step.Module is { } module) module.Parameters = module.Parameters?.OfType<NameValue>().ToList() ?? [];
+        if (step.Action is { } action)
+        {
+            action.Fields = action.Fields?.OfType<ModuleFormField>().ToList() ?? [];
+            action.Buttons = action.Buttons?.OfType<ActionButton>().ToList() ?? [];
+        }
+        return step;
+    }
 
     public static string SerializeSteps(IEnumerable<WorkflowStep> steps) => JsonSerializer.Serialize(steps, Options);
 

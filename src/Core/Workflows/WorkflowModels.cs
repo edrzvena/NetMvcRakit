@@ -45,7 +45,10 @@ public sealed class RestStepConfig
     public string Url { get; set; } = "";
     public List<NameValue> Headers { get; set; } = [];
 
-    /// <summary>Request body (POST/PUT/PATCH/DELETE). With a JSON content type placeholder values are JSON-escaped.</summary>
+    /// <summary>
+    /// Request body (POST/PUT/PATCH/DELETE). Placeholder values are escaped for the content type: JSON-escaped (JSON),
+    /// percent-encoded (form-urlencoded), XML-escaped (XML); plain text gets them as they are (see <see cref="WorkflowTemplate.BodyEncoder"/>).
+    /// </summary>
     public string? Body { get; set; }
 
     /// <summary>Content type of the body; blank = <c>application/json</c>.</summary>

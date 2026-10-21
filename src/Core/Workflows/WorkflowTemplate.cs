@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Rakit.Core.DataSources;
@@ -49,6 +50,23 @@ public static partial class WorkflowTemplate
     {
         var encoded = JsonEncodedText.Encode(value, System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping).ToString();
         return encoded;
+    }
+
+    /// <summary>Escapes a value so it can sit in XML text or an attribute (&amp; &lt; &gt; " ').</summary>
+    public static string XmlEscape(string value) => SecurityElement.Escape(value) ?? "";
+
+    /// <summary>
+    /// How placeholder values are escaped in a request body of <paramref name="contentType"/>: JSON-escaped for a JSON type,
+    /// percent-encoded for <c>application/x-www-form-urlencoded</c> (so a value cannot add a field with '&amp;' or '='), XML-escaped
+    /// for an XML type, and as they are for anything else (plain text). Null = as they are.
+    /// </summary>
+    public static Func<string, string>? BodyEncoder(string? contentType)
+    {
+        var media = (contentType ?? "").Split(';')[0].Trim().ToLowerInvariant();
+        if (media.Length == 0 || media.Contains("json")) return JsonEscape;
+        if (media == "application/x-www-form-urlencoded") return Uri.EscapeDataString;
+        if (media.EndsWith("/xml", StringComparison.Ordinal) || media.EndsWith("+xml", StringComparison.Ordinal)) return XmlEscape;
+        return null;
     }
 }
 
@@ -108,6 +126,7 @@ public sealed class WorkflowValues(
         bool b => b ? "true" : "false",
         DateTime d => d.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
         DateTimeOffset d => d.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+        byte[] bytes => "0x" + Convert.ToHexString(bytes), // ToString() would be the text "System.Byte[]"
         IFormattable f => f.ToString(null, CultureInfo.InvariantCulture),
         _ => value.ToString(),
     };
