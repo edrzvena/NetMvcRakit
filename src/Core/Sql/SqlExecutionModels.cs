@@ -15,8 +15,9 @@ public sealed record SqlExecOptions
     public StatementType StatementType { get; init; } = StatementType.Query;
 
     /// <summary>
-    /// Procedures only: run inside a transaction that is always rolled back (builder preview), so a procedure that
-    /// writes leaves nothing behind. Not honoured by <see cref="ISqlExecutionService.ExecuteQueryAsync"/>.
+    /// Run inside a transaction that is always rolled back (builder preview of a procedure, and every raw SQL Query
+    /// statement), so a procedure that writes leaves nothing behind. On a <see cref="Scope"/> procedures ignore it, while
+    /// <see cref="ISqlExecutionService.ExecuteQueryAsync"/> rolls back to a savepoint of the scope's transaction.
     /// </summary>
     public bool RollbackAfter { get; init; }
 
@@ -29,8 +30,8 @@ public sealed record SqlExecOptions
 
     /// <summary>
     /// Run on this scope's connection and transaction instead of opening one. The scope's owner commits or rolls back, so
-    /// <see cref="RollbackAfter"/> and <see cref="CommitOnlyIfReturnValueZero"/> do not apply (a procedure's return value is
-    /// only reported).
+    /// <see cref="CommitOnlyIfReturnValueZero"/> does not apply (a procedure's return value is only reported) and
+    /// <see cref="RollbackAfter"/> only applies to queries (as a savepoint).
     /// </summary>
     public ISqlScope? Scope { get; init; }
 }

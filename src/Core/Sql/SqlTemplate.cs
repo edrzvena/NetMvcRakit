@@ -85,6 +85,68 @@ public static partial class SqlTemplate
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+    [GeneratedRegex(@"\bDECLARE\b([^;\n]*)", RegexOptions.IgnoreCase)]
+    private static partial Regex DeclarePattern();
+
+    [GeneratedRegex(@"(?:^|,)\s*@([A-Za-z_][A-Za-z0-9_]*)")]
+    private static partial Regex DeclaredNamePattern();
+
+    /// <summary>
+    /// Local variables the SQL declares itself (<c>DECLARE @x int, @y int</c>, on the line of the DECLARE), outside string
+    /// literals and comments. Such a name is the SQL's own variable: binding a parameter of that name as well fails with
+    /// "The variable name has already been declared".
+    /// </summary>
+    public static IReadOnlyList<string> DeclaredVariables(string sql)
+    {
+        ArgumentNullException.ThrowIfNull(sql);
+        var code = WithoutLiteralsAndComments(sql);
+        return DeclarePattern().Matches(code)
+            .SelectMany(m => DeclaredNamePattern().Matches(m.Groups[1].Value).Select(n => n.Groups[1].Value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>The text with string literals and comments blanked out (same length, line breaks kept).</summary>
+    private static string WithoutLiteralsAndComments(string s)
+    {
+        var chars = s.ToCharArray();
+        void Blank(int from, int to)
+        {
+            for (var k = from; k < to && k < chars.Length; k++)
+                if (chars[k] is not ('\n' or '\r')) chars[k] = ' ';
+        }
+
+        var i = 0;
+        while (i < s.Length)
+        {
+            if (s[i] == '\'')
+            {
+                var end = EndOfStringLiteral(s, i);
+                Blank(i, end);
+                i = end;
+            }
+            else if (s[i] == '-' && Peek(s, i + 1) == '-')
+            {
+                var end = s.IndexOf('\n', i);
+                end = end < 0 ? s.Length : end;
+                Blank(i, end);
+                i = end;
+            }
+            else if (s[i] == '/' && Peek(s, i + 1) == '*')
+            {
+                var end = s.IndexOf("*/", i + 2, StringComparison.Ordinal);
+                end = end < 0 ? s.Length : end + 2;
+                Blank(i, end);
+                i = end;
+            }
+            else
+            {
+                i++;
+            }
+        }
+        return new string(chars);
+    }
+
     private static char Peek(string s, int index) => index < s.Length ? s[index] : '\0';
 
     /// <summary>Index just past the closing quote ('' is an escaped quote).</summary>

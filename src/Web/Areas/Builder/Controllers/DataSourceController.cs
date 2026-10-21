@@ -29,7 +29,8 @@ public class DataSourceController(
 
     public Task<IActionResult> Index(CancellationToken ct) => GuardAsync(async () =>
         View(new DataSourceIndexViewModel(
-            await repository.ListAsync(ct), options.Value.AllowRawQuery, options.Value.AllowWrite, TempData["Message"] as string)));
+            await repository.ListAsync(ct), options.Value.AllowRawQuery, options.Value.AllowWrite, TempData["Message"] as string,
+            TempData["Error"] as string)));
 
     public Task<IActionResult> Versions(Guid id, CancellationToken ct) => GuardAsync(async () =>
     {
@@ -109,6 +110,13 @@ public class DataSourceController(
         catch (DataSourceNotFoundException)
         {
             return NotFound();
+        }
+        catch (DataSourceInUseException ex)
+        {
+            var users = new List<string>();
+            if (ex.ModuleCount > 0) users.Add($"{ex.ModuleCount} module");
+            if (ex.WorkflowCount > 0) users.Add($"{ex.WorkflowCount} workflow");
+            TempData["Error"] = $"Data source tidak bisa dihapus: masih dipakai {string.Join(" dan ", users)}. Lepaskan dulu dari sana.";
         }
         return RedirectToAction(nameof(Index));
     });

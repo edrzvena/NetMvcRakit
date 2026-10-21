@@ -17,6 +17,7 @@ public sealed class SqlExecutionService(
     private const int SqlTimeoutErrorNumber = -2;
     private const int FirstUserErrorNumber = 50000;
     private const string ReturnValueParameter = "@RETURN_VALUE";
+    private const string ReadSavepoint = "rakit_read";
 
     /// <summary>The scope's connection and transaction; the owner commits, rolls back and disposes them.</summary>
     private sealed class SqlScope(SqlConnection connection, SqlTransaction transaction) : ISqlScope
@@ -90,19 +91,39 @@ public sealed class SqlExecutionService(
             var scope = options.Scope as SqlScope;
             await using var owned = scope is null ? await connections.CreateExecutionAsync(ct) : null;
             var conn = scope?.Connection ?? owned!;
+
+            // RollbackAfter: whatever the statement changed is undone once it has been read (its own transaction, or a
+            // savepoint of the scope's). SQL that only "queries" can still write: rakit_exec may execute every procedure
+            // of the app schema, and a procedure name alone at the start of a batch runs it.
+            await using var tx = options.RollbackAfter && scope is null ? (SqlTransaction)await conn.BeginTransactionAsync(ct) : null;
+            var savepoint = options.RollbackAfter && scope is not null;
+            if (savepoint) scope!.Transaction.Save(ReadSavepoint);
+
             await using var cmd = conn.CreateCommand();
-            cmd.Transaction = scope?.Transaction;
+            cmd.Transaction = scope?.Transaction ?? tx;
             cmd.CommandText = template.Sql;
             cmd.CommandTimeout = options.TimeoutSeconds;
 
-            // Only parameters the SQL actually mentions are sent; unused arguments are ignored.
+            // Only parameters the SQL actually mentions are sent; unused arguments are ignored, and so is a name the SQL
+            // declares as its own variable (DECLARE @Take ...), unless it is a {placeholder}.
+            var declared = SqlTemplate.DeclaredVariables(template.Sql)
+                .Where(d => !template.Placeholders.Contains(d, StringComparer.OrdinalIgnoreCase))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
             foreach (var name in SqlTemplate.ReferencedParameters(template.Sql))
-                if (values.TryGetValue(name, out var value))
+                if (!declared.Contains(name) && values.TryGetValue(name, out var value))
                     cmd.Parameters.Add(new SqlParameter("@" + name, ToDbValue(name, value)));
 
-            return options.StatementType == StatementType.Command
-                ? await RunCommandAsync(cmd, stopwatch, ct)
-                : await RunQueryAsync(cmd, options.MaxRows, stopwatch, ct);
+            try
+            {
+                return options.StatementType == StatementType.Command
+                    ? await RunCommandAsync(cmd, stopwatch, ct)
+                    : await RunQueryAsync(cmd, options.MaxRows, stopwatch, ct);
+            }
+            finally
+            {
+                if (tx is not null) await RollbackQuietlyAsync(tx);
+                else if (savepoint) RollbackToSavepointQuietly(scope!.Transaction);
+            }
         }
         catch (SqlException ex)
         {
@@ -267,7 +288,7 @@ public sealed class SqlExecutionService(
         }
 
         // Checked only now so an unsupported type on an optional parameter that is left out does not block the call.
-        var type = ToSqlDbType(declared.DataType)
+        var type = SqlValues.ToSqlDbType(declared.DataType)
             ?? throw new ArgumentException($"Parameter '{plainName}' bertipe '{declared.DataType}', yang tidak didukung.", "args");
 
         var parameter = new SqlParameter(declared.Name, type)
@@ -297,7 +318,7 @@ public sealed class SqlExecutionService(
         if (supplied)
         {
             var dbValue = ToDbValue(plainName, value);
-            if (dbValue is string text) dbValue = CoerceString(plainName, text, type);
+            if (dbValue is string text) dbValue = SqlValues.FromText(plainName, text, type);
             EnsureFits(plainName, dbValue, parameter);
             parameter.Value = dbValue;
         }
@@ -308,53 +329,6 @@ public sealed class SqlExecutionService(
         return parameter;
     }
 
-    /// <summary>
-    /// Values from query strings and forms arrive as text, but a typed parameter will not convert them itself
-    /// (string to uniqueidentifier fails). Text for a non-text parameter is parsed with the invariant culture;
-    /// blank text means "no value" (null) rather than the 0 / 1900-01-01 SQL Server would make of ''.
-    /// </summary>
-    private static object CoerceString(string name, string text, SqlDbType type)
-    {
-        if (type is SqlDbType.Char or SqlDbType.VarChar or SqlDbType.NChar or SqlDbType.NVarChar
-            or SqlDbType.Text or SqlDbType.NText or SqlDbType.Xml or SqlDbType.Binary or SqlDbType.VarBinary or SqlDbType.Image)
-            return text;
-
-        var trimmed = text.Trim();
-        if (trimmed.Length == 0) return DBNull.Value;
-
-        var culture = CultureInfo.InvariantCulture;
-        try
-        {
-            return type switch
-            {
-                SqlDbType.BigInt => long.Parse(trimmed, NumberStyles.Integer, culture),
-                SqlDbType.Int => int.Parse(trimmed, NumberStyles.Integer, culture),
-                SqlDbType.SmallInt => short.Parse(trimmed, NumberStyles.Integer, culture),
-                SqlDbType.TinyInt => byte.Parse(trimmed, NumberStyles.Integer, culture),
-                SqlDbType.Bit => ParseBit(trimmed),
-                SqlDbType.Decimal or SqlDbType.Money or SqlDbType.SmallMoney => decimal.Parse(trimmed, NumberStyles.Number, culture),
-                SqlDbType.Float or SqlDbType.Real => double.Parse(trimmed, NumberStyles.Float, culture),
-                SqlDbType.Date or SqlDbType.DateTime or SqlDbType.DateTime2 or SqlDbType.SmallDateTime
-                    => DateTime.Parse(trimmed, culture, DateTimeStyles.None),
-                SqlDbType.DateTimeOffset => System.DateTimeOffset.Parse(trimmed, culture),
-                SqlDbType.Time => TimeSpan.Parse(trimmed, culture),
-                SqlDbType.UniqueIdentifier => Guid.Parse(trimmed),
-                _ => text,
-            };
-        }
-        catch (Exception ex) when (ex is FormatException or OverflowException)
-        {
-            throw new ArgumentException($"Nilai parameter '{name}' ('{text}') bukan {type} yang valid.", "args", ex);
-        }
-    }
-
-    private static bool ParseBit(string text) => text.ToLowerInvariant() switch
-    {
-        "true" or "1" => true,
-        "false" or "0" => false,
-        _ => throw new FormatException("Not a bit value."),
-    };
-
     /// <summary>SqlClient silently cuts an over-long value to the parameter size; SQL Server itself would raise an error, so do the same.</summary>
     private static void EnsureFits(string name, object dbValue, SqlParameter parameter)
     {
@@ -364,38 +338,6 @@ public sealed class SqlExecutionService(
             throw new ArgumentException($"Nilai parameter '{name}' melebihi panjang maksimum {parameter.Size}.", "args");
     }
 
-    private static SqlDbType? ToSqlDbType(string typeName) => typeName.ToLowerInvariant() switch
-    {
-        "bigint" => SqlDbType.BigInt,
-        "int" => SqlDbType.Int,
-        "smallint" => SqlDbType.SmallInt,
-        "tinyint" => SqlDbType.TinyInt,
-        "bit" => SqlDbType.Bit,
-        "decimal" or "numeric" => SqlDbType.Decimal,
-        "money" => SqlDbType.Money,
-        "smallmoney" => SqlDbType.SmallMoney,
-        "float" => SqlDbType.Float,
-        "real" => SqlDbType.Real,
-        "date" => SqlDbType.Date,
-        "datetime" => SqlDbType.DateTime,
-        "datetime2" => SqlDbType.DateTime2,
-        "smalldatetime" => SqlDbType.SmallDateTime,
-        "datetimeoffset" => SqlDbType.DateTimeOffset,
-        "time" => SqlDbType.Time,
-        "char" => SqlDbType.Char,
-        "varchar" => SqlDbType.VarChar,
-        "nchar" => SqlDbType.NChar,
-        "nvarchar" => SqlDbType.NVarChar,
-        "text" => SqlDbType.Text,
-        "ntext" => SqlDbType.NText,
-        "binary" => SqlDbType.Binary,
-        "varbinary" => SqlDbType.VarBinary,
-        "image" => SqlDbType.Image,
-        "uniqueidentifier" => SqlDbType.UniqueIdentifier,
-        "xml" => SqlDbType.Xml,
-        _ => null,
-    };
-
     private static object ToDbValue(string name, object? value) => value switch
     {
         null => DBNull.Value,
@@ -404,6 +346,15 @@ public sealed class SqlExecutionService(
         _ => throw new ArgumentException(
             $"Nilai parameter '{name}' bertipe {value.GetType().Name}, yang tidak didukung.", "args"),
     };
+
+    private static void RollbackToSavepointQuietly(SqlTransaction tx)
+    {
+        try { tx.Rollback(ReadSavepoint); }
+        catch (Exception ex) when (ex is InvalidOperationException or SqlException)
+        {
+            // An error doomed the scope's transaction; its owner rolls everything back.
+        }
+    }
 
     private static async Task RollbackQuietlyAsync(SqlTransaction tx)
     {

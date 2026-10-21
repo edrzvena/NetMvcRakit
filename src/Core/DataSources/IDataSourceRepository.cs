@@ -19,7 +19,9 @@ public interface IDataSourceRepository
     /// <exception cref="DataSourceNotFoundException"/>
     Task<DataSource> UpdateAsync(Guid id, DataSourceInput input, string user, CancellationToken ct = default);
 
-    /// <summary>Soft delete. <exception cref="DataSourceNotFoundException"/></summary>
+    /// <summary>Soft delete. Refused while a (non-deleted) module or workflow still points at the data source.</summary>
+    /// <exception cref="DataSourceNotFoundException"/>
+    /// <exception cref="DataSourceInUseException"/>
     Task DeleteAsync(Guid id, string user, CancellationToken ct = default);
 
     /// <summary>Newest first.</summary>

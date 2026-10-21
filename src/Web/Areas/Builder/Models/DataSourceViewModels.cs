@@ -5,7 +5,7 @@ using Rakit.Core.Schema;
 namespace Rakit.Web.Areas.Builder.Models;
 
 public sealed record DataSourceIndexViewModel(
-    IReadOnlyList<DataSourceSummary> Items, bool AllowRawQuery, bool AllowWrite, string? Message);
+    IReadOnlyList<DataSourceSummary> Items, bool AllowRawQuery, bool AllowWrite, string? Message, string? Error = null);
 
 /// <summary>
 /// Posted fields: Id, Code, Name, Mode, StatementType, DefinitionJson.

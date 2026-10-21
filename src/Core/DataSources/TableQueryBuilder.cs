@@ -19,11 +19,16 @@ public sealed record TableQueryRequest(int Skip = 0, int Take = 10, string? Orde
 /// <param name="CountSql">Total rows matching the same filters/search, in a column named <c>Number</c>.</param>
 /// <param name="PagingArgs">Values for <c>@Skip</c>, <c>@Take</c>, <c>@Search</c>; merge with the resolved filter parameters.</param>
 /// <param name="FilterParameters">Mapped parameter names the filters read (their values come from the parameter resolver).</param>
+/// <param name="FilterTypes">
+/// Catalog type of the column a filter parameter is compared with (=, &lt;&gt;, &lt;, ...), so text from a URL can be turned
+/// into that type first. Left out for a parameter used only by <c>like</c>, or compared with columns of different types.
+/// </param>
 public sealed record TableQuery(
     string DataSql,
     string CountSql,
     IReadOnlyDictionary<string, object?> PagingArgs,
-    IReadOnlyList<string> FilterParameters);
+    IReadOnlyList<string> FilterParameters,
+    IReadOnlyDictionary<string, string> FilterTypes);
 
 public interface ITableQueryBuilder
 {
@@ -42,6 +47,8 @@ public sealed class TableQueryBuilder(ISchemaBrowserService schema) : ITableQuer
 
     private static readonly HashSet<string> TextTypes = new(StringComparer.OrdinalIgnoreCase)
         { "char", "varchar", "nchar", "nvarchar", "text", "ntext" };
+
+    private static readonly HashSet<string> NonUnicodeTextTypes = new(StringComparer.OrdinalIgnoreCase) { "char", "varchar" };
 
     private static readonly string[] ReservedParameters = ["Skip", "Take", "Search"];
 
@@ -70,6 +77,7 @@ public sealed class TableQueryBuilder(ISchemaBrowserService schema) : ITableQuer
 
         var where = new List<string>();
         var filterParameters = new List<string>();
+        var filterTypes = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase); // null = columns of different types
         foreach (var f in table.Filters)
         {
             var col = Column(f.Column, "filter");
@@ -80,11 +88,24 @@ public sealed class TableQueryBuilder(ISchemaBrowserService schema) : ITableQuer
                 throw new TableDefinitionException($"Filter pada kolom '{col.Name}': nama parameter '{p}' dicadangkan (Skip, Take, Search).");
 
             var op = (f.Operator ?? "").Trim();
-            var condition = op.Equals("like", StringComparison.OrdinalIgnoreCase)
-                ? $"{Quote(col.Name)} LIKE {ContainsPattern("@" + p)} ESCAPE N'\\'"
-                : Operators.TryGetValue(op, out var sqlOp)
-                    ? $"{Quote(col.Name)} {sqlOp} @{p}"
-                    : throw new TableDefinitionException($"Operator '{f.Operator}' tidak didukung. Gunakan: =, <>, >, >=, <, <=, like.");
+            string condition;
+            if (op.Equals("like", StringComparison.OrdinalIgnoreCase))
+            {
+                condition = $"{Quote(col.Name)} LIKE {ContainsPattern("@" + p)} ESCAPE N'\\'";
+            }
+            else if (Operators.TryGetValue(op, out var sqlOp))
+            {
+                // Text arrives as nvarchar; against a char/varchar column that would convert the column and rule out its index.
+                var value = NonUnicodeTextTypes.Contains(col.DataType) ? $"CAST(@{p} AS varchar(8000))" : "@" + p;
+                condition = $"{Quote(col.Name)} {sqlOp} {value}";
+                filterTypes[p] = filterTypes.TryGetValue(p, out var seen) && !string.Equals(seen, col.DataType, StringComparison.OrdinalIgnoreCase)
+                    ? null
+                    : col.DataType;
+            }
+            else
+            {
+                throw new TableDefinitionException($"Operator '{f.Operator}' tidak didukung. Gunakan: =, <>, >, >=, <, <=, like.");
+            }
 
             // A null parameter means "no filter", so optional filters need no special handling by the caller.
             where.Add($"(@{p} IS NULL OR {condition})");
@@ -120,7 +141,9 @@ public sealed class TableQueryBuilder(ISchemaBrowserService schema) : ITableQuer
             ["Search"] = request.Search?.Trim() ?? "",
         };
 
-        return new TableQuery(dataSql, countSql, paging, filterParameters);
+        var typed = filterTypes.Where(kv => kv.Value is not null)
+            .ToDictionary(kv => kv.Key, kv => kv.Value!, StringComparer.OrdinalIgnoreCase);
+        return new TableQuery(dataSql, countSql, paging, filterParameters, typed);
     }
 
     private static string BuildOrderBy(

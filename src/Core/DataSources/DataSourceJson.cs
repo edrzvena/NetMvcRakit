@@ -15,7 +15,23 @@ public static class DataSourceJson
     public static string Serialize(DataSourceDefinition definition) => JsonSerializer.Serialize(definition, Options);
 
     public static DataSourceDefinition Deserialize(string json)
-        => JsonSerializer.Deserialize<DataSourceDefinition>(json, Options) ?? new DataSourceDefinition();
+        => Repair(JsonSerializer.Deserialize<DataSourceDefinition>(json, Options) ?? new DataSourceDefinition());
+
+    /// <summary>
+    /// JSON may say null where the model has a list ("parameters": null, a null filter); the validator, the table query
+    /// builder and the resolver count on the lists being there, so a null list becomes empty and null items are dropped.
+    /// </summary>
+    private static DataSourceDefinition Repair(DataSourceDefinition definition)
+    {
+        definition.Parameters = definition.Parameters?.OfType<ParameterMapping>().ToList() ?? [];
+        if (definition.Table is { } table)
+        {
+            table.Columns = table.Columns?.OfType<string>().ToList() ?? [];
+            table.Filters = table.Filters?.OfType<TableFilter>().ToList() ?? [];
+            table.Sort = table.Sort?.OfType<TableSort>().ToList() ?? [];
+        }
+        return definition;
+    }
 
     public static string ModeToColumn(DataSourceMode mode) => mode switch
     {

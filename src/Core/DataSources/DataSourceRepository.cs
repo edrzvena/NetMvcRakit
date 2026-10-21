@@ -128,13 +128,36 @@ WHERE Id = @id";
     public async Task DeleteAsync(Guid id, string user, CancellationToken ct = default)
     {
         await using var conn = await connections.CreateMetadataAsync(ct);
+        await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(ct);
+
+        // A module points at a data source from many places (list, detail, insert/update/delete, lookups, filters) and a
+        // workflow from its steps; all of them store the id as a JSON string, so the quoted id is looked for in the JSON text.
+        await using (var count = conn.CreateCommand())
+        {
+            count.Transaction = tx;
+            count.CommandText = @"
+SELECT (SELECT COUNT(*) FROM rakit.Modules m WITH (UPDLOCK, HOLDLOCK)
+        WHERE m.IsDeleted = 0 AND LOWER(m.Config) LIKE @pattern),
+       (SELECT COUNT(DISTINCT s.WorkflowId) FROM rakit.Steps s WITH (UPDLOCK, HOLDLOCK)
+        JOIN rakit.Workflows w ON w.Id = s.WorkflowId
+        WHERE w.IsDeleted = 0 AND s.IsDeleted = 0 AND LOWER(s.Data) LIKE @pattern)";
+            count.Parameters.Add(new SqlParameter("@pattern", SqlDbType.NVarChar, 50) { Value = "%\"" + id.ToString("D") + "\"%" });
+            await using var reader = await count.ExecuteReaderAsync(ct);
+            await reader.ReadAsync(ct);
+            var (modules, workflows) = (reader.GetInt32(0), reader.GetInt32(1));
+            if (modules > 0 || workflows > 0) throw new DataSourceInUseException(id, modules, workflows);
+        }
+
         await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = "UPDATE rakit.DataSources SET IsDeleted = 1, UpdatedBy = @user, Updated = @now WHERE Id = @id AND IsDeleted = 0";
         cmd.Parameters.Add(new SqlParameter("@id", SqlDbType.UniqueIdentifier) { Value = id });
         cmd.Parameters.Add(new SqlParameter("@user", SqlDbType.NVarChar, -1) { Value = user ?? "" });
         cmd.Parameters.Add(new SqlParameter("@now", SqlDbType.DateTime2) { Value = DateTime.UtcNow });
         if (await cmd.ExecuteNonQueryAsync(ct) == 0)
             throw new DataSourceNotFoundException(id);
+
+        await tx.CommitAsync(ct);
     }
 
     public async Task<IReadOnlyList<DataSourceVersion>> GetVersionsAsync(Guid id, CancellationToken ct = default)

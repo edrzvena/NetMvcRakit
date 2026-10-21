@@ -204,7 +204,18 @@ public sealed class DataSourceService(
 
         var all = new Dictionary<string, object?>(query.PagingArgs, StringComparer.OrdinalIgnoreCase);
         foreach (var name in query.FilterParameters)
-            all[name] = args.TryGetValue(name, out var v) ? v : null; // unmapped filter parameter = no filter
+        {
+            var value = args.TryGetValue(name, out var v) ? v : null; // unmapped filter parameter = no filter
+
+            // Text (a URL, a form) becomes the compared column's type here: "abc" for an int column is the visitor's
+            // mistake (ArgumentException, a 400 for the caller) instead of a conversion error in the database.
+            if (value is string text && query.FilterTypes.TryGetValue(name, out var type) && SqlValues.ToSqlDbType(type) is { } dbType)
+            {
+                var converted = SqlValues.FromText(name, text, dbType);
+                value = converted is DBNull ? null : converted;
+            }
+            all[name] = value;
+        }
 
         var data = await execution.ExecuteQueryAsync(query.DataSql, all, execOptions, ct);
 
@@ -224,6 +235,10 @@ public sealed class DataSourceService(
     {
         var sql = def.Query!;
 
+        // A Query statement is a read, and raw SQL can still write through a procedure (rakit_exec may execute every
+        // procedure of the app schema, whitelisted or not), so whatever it changes is rolled back once it is read.
+        if (execOptions.StatementType == StatementType.Query) execOptions = execOptions with { RollbackAfter = true };
+
         // DS-07 conventions are available to raw queries as native tokens; a mapped parameter of the same name wins.
         var all = new Dictionary<string, object?>(args, StringComparer.OrdinalIgnoreCase);
         all.TryAdd("Skip", request.Skip);
@@ -235,8 +250,9 @@ public sealed class DataSourceService(
         var result = await execution.ExecuteQueryAsync(sql, all, execOptions, ct);
 
         int? total = null;
-        var usesIsCount = SqlTemplate.ReferencedParameters(SqlTemplate.Rewrite(sql).Sql)
-            .Contains("IsCount", StringComparer.OrdinalIgnoreCase);
+        var rewritten = SqlTemplate.Rewrite(sql).Sql;
+        var usesIsCount = SqlTemplate.ReferencedParameters(rewritten).Contains("IsCount", StringComparer.OrdinalIgnoreCase)
+            && !SqlTemplate.DeclaredVariables(rewritten).Contains("IsCount", StringComparer.OrdinalIgnoreCase);
         if (request.IncludeTotal && usesIsCount && execOptions.StatementType == StatementType.Query)
         {
             var countArgs = new Dictionary<string, object?>(all, StringComparer.OrdinalIgnoreCase) { ["IsCount"] = true };

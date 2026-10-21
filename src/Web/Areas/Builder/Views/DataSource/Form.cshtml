@@ -183,6 +183,10 @@
         <div class="form-text">
             Untuk stored procedure, pilih Command bila prosedurnya mengubah data: Command hanya bisa dijalankan bila <code>AllowWrite</code> aktif dan tidak bisa di-preview.
         </div>
+        <div class="form-text">
+            Query mentah berjenis Query selalu di-rollback setelah hasilnya dibaca, jadi tidak bisa mengubah data (juga lewat <code>EXEC</code>).
+            Query mentah berjenis Command bisa memanggil prosedur apa pun di schema yang diizinkan, termasuk yang tidak ada di whitelist SP.
+        </div>
     </section>
 
     @* ---------------- Parameters ---------------- *@
