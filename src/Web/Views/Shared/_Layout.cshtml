@@ -6,6 +6,7 @@
         && string.Equals(controller, c, StringComparison.OrdinalIgnoreCase) ? "active" : "";
     var isHome = area == "" && string.Equals(controller, "Home", StringComparison.OrdinalIgnoreCase);
     var title = ViewData["Title"] as string ?? "Rakit";
+    var builderAllowed = Rakit.Web.Security.BuilderAccess.IsAllowed(Context);
 }
 <!DOCTYPE html>
 <html lang="id" data-bs-theme="light">
@@ -42,7 +43,9 @@
                 @* The pages a builder published (Builder > Menu): items, folders and separators *@
                 @await Component.InvokeAsync("NavigationMenu")
 
-                @* Builder and admin tools (no login yet, so everyone sees them) *@
+                @* Builder and admin tools (no login yet: shown only where they can be opened, see BuilderAccess) *@
+                @if (builderAllowed)
+                {
                 <div class="rk-section">Builder</div>
                 <a class="rk-link @Active("Builder", "Module")" asp-area="Builder" asp-controller="Module" asp-action="Index"><i class="bi bi-window-stack"></i><span>Module</span></a>
                 <a class="rk-link @Active("Builder", "Workflow")" asp-area="Builder" asp-controller="Workflow" asp-action="Index"><i class="bi bi-diagram-3"></i><span>Workflow</span></a>
@@ -54,11 +57,12 @@
                 <div class="rk-section">Admin</div>
                 <a class="rk-link @Active("Admin", "SpWhitelist")" asp-area="Admin" asp-controller="SpWhitelist" asp-action="Index"><i class="bi bi-shield-check"></i><span>SP Whitelist</span></a>
                 <a class="rk-link @Active("Admin", "Health")" asp-area="Admin" asp-controller="Health" asp-action="Index"><i class="bi bi-heart-pulse"></i><span>Health</span></a>
+                }
             </nav>
 
             <div class="rk-sidebar-foot">
                 <strong>Mode pengembangan</strong><br />
-                Belum ada login: semua halaman, termasuk Builder dan Admin, terbuka untuk siapa saja.
+                Belum ada login: Builder dan Admin hanya terbuka dari komputer server ini (Rakit:Security:BuilderLocalOnly).
             </div>
         </aside>
         <div class="rk-backdrop" id="rk-backdrop"></div>

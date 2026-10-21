@@ -21,6 +21,14 @@ public static class TableProcedureScripts
     private static string Param(PlaygroundColumn c, bool required)
         => "@" + c.Name + " " + c.Type + (required ? "" : " = NULL");
 
+    /// <summary>
+    /// A default that SQL Server only accepts as a DEFAULT constraint (NEWSEQUENTIALID()) or not inside ISNULL (NEXT VALUE FOR):
+    /// such a column is left out of a generated INSERT so the database fills it.
+    /// </summary>
+    public static bool HasDefaultOnlyValue(PlaygroundColumn c)
+        => c.DefaultDefinition is { } d
+           && (d.Contains("newsequentialid", StringComparison.OrdinalIgnoreCase) || d.Contains("next value for", StringComparison.OrdinalIgnoreCase));
+
     /// <summary>NOT NULL without a database default has to be given; everything else may be left out.</summary>
     private static bool IsRequired(PlaygroundColumn c) => !c.IsNullable && c.DefaultDefinition is null;
 

@@ -1,4 +1,5 @@
 using Rakit.Core;
+using Rakit.Web.Security;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,6 +20,8 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseSecurityHeaders();
+app.UseBuilderAccess();
 app.UseRouting();
 
 app.UseAuthorization();

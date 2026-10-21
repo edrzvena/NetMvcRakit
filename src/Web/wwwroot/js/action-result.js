@@ -206,8 +206,8 @@
         if (display.kind === 'form') return display.prompt ? showForm(display.prompt, env) : false;
 
         if (display.kind === 'module') {
-            // a path of this site only: never a full URL, never protocol-relative ("//host")
-            if (typeof display.url === 'string' && display.url.startsWith('/') && !display.url.startsWith('//')) {
+            // a path of this site only: never a full URL, never protocol-relative ("//host", or "/\host" which browsers read the same way)
+            if (typeof display.url === 'string' && display.url.startsWith('/') && !display.url.startsWith('//') && !display.url.includes('\\')) {
                 window.location.assign(display.url);
                 return true;
             }

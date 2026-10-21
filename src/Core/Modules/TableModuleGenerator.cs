@@ -137,6 +137,9 @@ public sealed class TableModuleGenerator(
         var wantsWrite = request.Insert || request.Update || request.Delete;
         if (wantsWrite && !inspection.CanWrite) throw Invalid("View hanya bisa dibaca: tidak bisa membuat Tambah, Ubah, atau Hapus.");
         if ((request.Update || request.Delete) && key is null) throw Invalid("Ubah dan Hapus membutuhkan kolom kunci.");
+        // the key becomes a procedure parameter (@Name) of Update / Delete
+        if ((request.Update || request.Delete) && !TableModuleMapping.IsPlainName(key!.Name))
+            throw Invalid($"Kolom kunci '{key.Name}' tidak bisa dipakai untuk Ubah atau Hapus: namanya harus huruf/angka/_ (tidak diawali angka).");
         if (request.ForForm && (request.Update || request.Delete || !request.Insert))
             throw Invalid("Module Form hanya memakai Tambah (Insert).");
         if (wantsWrite && !CanCreateProcedures)
@@ -146,8 +149,11 @@ public sealed class TableModuleGenerator(
 
         var writable = selected.Where(c => Choice(c).Writable).ToList();
         var identityKey = key is { IsIdentity: true } ? key : null;
-        // Insert may also fill a non-identity key; the identity key is returned instead.
-        var insertColumns = writable;
+        // Insert may also fill a non-identity key; the identity key is returned instead. A column whose default is NEWSEQUENTIALID()
+        // or NEXT VALUE FOR is left to the database: those cannot be written as ISNULL(@value, default) in the procedure.
+        var insertColumns = writable.Where(c => !TableProcedureScripts.HasDefaultOnlyValue(c)).ToList();
+        foreach (var c in writable.Where(TableProcedureScripts.HasDefaultOnlyValue))
+            notes.Add($"Kolom {c.Name} diisi default database ({c.DefaultDefinition}) saat Tambah, jadi isiannya di form Tambah diabaikan.");
         var updateColumns = writable.Where(c => key is null || !c.Name.Equals(key.Name, StringComparison.OrdinalIgnoreCase)).ToList();
         if (request.Update && updateColumns.Count == 0) throw Invalid("Tidak ada kolom (selain kunci) yang bisa diubah.");
         if ((request.Insert || request.Update) && writable.Count > ModuleInputValidator.MaxFormFields)

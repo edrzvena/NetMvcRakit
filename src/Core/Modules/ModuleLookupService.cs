@@ -130,8 +130,12 @@ public sealed class ModuleLookupService(
             throw Unavailable(module, name,
                 $"the lookup result has no column '{(valueIndex < 0 ? lookup.ValueField : lookup.TextField)}'", null);
 
+        // A lookup that does not use @Skip / @Take returns every row on every call; its page is taken here (as for a module's list).
+        var unpaged = list.Rows.Count > take || list.Truncated;
+        var pageRows = (unpaged ? list.Rows.Skip(skip) : list.Rows).Take(take).ToList();
+
         var items = new List<ModuleLookupItem>();
-        foreach (var row in list.Rows.Take(take))
+        foreach (var row in pageRows)
         {
             var value = valueIndex < row.Count ? ModuleFieldValue.ToText(row[valueIndex]) : null;
             if (value is null) continue; // a choice without a value cannot be stored
@@ -139,8 +143,11 @@ public sealed class ModuleLookupService(
             items.Add(new ModuleLookupItem(value, string.IsNullOrWhiteSpace(text) ? value : text));
         }
 
-        var hasNext = result.TotalCount is { } total ? skip + list.Rows.Take(take).Count() < total : list.Rows.Count >= take;
-        return new ModuleLookupResult(items, result.TotalCount, skip, take, hasNext);
+        var totalCount = result.TotalCount ?? (unpaged && !list.Truncated ? list.Rows.Count : null);
+        var hasNext = totalCount is { } total ? skip + pageRows.Count < total
+            : unpaged ? list.Rows.Count > skip + pageRows.Count
+            : list.Rows.Count >= take;
+        return new ModuleLookupResult(items, totalCount, skip, take, hasNext);
     }
 
     private static int IndexOf(IReadOnlyList<string> names, string name)
