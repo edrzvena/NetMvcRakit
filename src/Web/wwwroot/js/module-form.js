@@ -938,15 +938,17 @@
             data.rows.length + ' baris' + (data.totalCount != null ? ' dari ' + data.totalCount : '') +
             ' | halaman mulai dari ' + (data.skip + 1) + (data.orderBy ? ' | urut ' + data.orderBy : '') }));
 
+        // "first_name_desc" sorts on "first_name": the direction is after the last '_' (a column "first" is not it)
+        const order = (data.orderBy || '').toLowerCase();
+        const sortedField = order.lastIndexOf('_') > 0 ? order.slice(0, order.lastIndexOf('_')) : '';
         const head = el('tr', {}, data.columns.map((c) => {
             if (!c.sortable) return el('th', { text: c.label });
-            const mark = data.orderBy && data.orderBy.toLowerCase().startsWith(c.field.toLowerCase() + '_')
-                ? (data.orderBy.toLowerCase().endsWith('_desc') ? ' ▼' : ' ▲') : '';
+            const same = sortedField !== '' && sortedField === c.field.toLowerCase();
+            const mark = same ? (order.endsWith('_desc') ? ' ▼' : ' ▲') : '';
             const link = el('a', { href: '#', class: 'text-decoration-none', text: c.label + mark });
             link.addEventListener('click', (ev) => {
                 ev.preventDefault();
-                const same = data.orderBy && data.orderBy.toLowerCase().startsWith(c.field.toLowerCase() + '_');
-                const desc = same && data.orderBy.toLowerCase().endsWith('_asc');
+                const desc = same && order.endsWith('_asc');
                 state.orderBy = c.field + (desc ? '_desc' : '_asc');
                 state.skip = 0;
                 runPreview();

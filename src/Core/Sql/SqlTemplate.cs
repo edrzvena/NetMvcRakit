@@ -88,22 +88,44 @@ public static partial class SqlTemplate
     [GeneratedRegex(@"\bDECLARE\b([^;\n]*)", RegexOptions.IgnoreCase)]
     private static partial Regex DeclarePattern();
 
-    [GeneratedRegex(@"(?:^|,)\s*@([A-Za-z_][A-Za-z0-9_]*)")]
+    [GeneratedRegex(@"^\s*@([A-Za-z_][A-Za-z0-9_]*)")]
     private static partial Regex DeclaredNamePattern();
 
     /// <summary>
     /// Local variables the SQL declares itself (<c>DECLARE @x int, @y int</c>, on the line of the DECLARE), outside string
     /// literals and comments. Such a name is the SQL's own variable: binding a parameter of that name as well fails with
-    /// "The variable name has already been declared".
+    /// "The variable name has already been declared". Only a comma outside parentheses starts the next declaration, so the
+    /// <c>@b</c> of <c>DECLARE @x int = COALESCE(@a, @b)</c> stays a parameter.
     /// </summary>
     public static IReadOnlyList<string> DeclaredVariables(string sql)
     {
         ArgumentNullException.ThrowIfNull(sql);
         var code = WithoutLiteralsAndComments(sql);
         return DeclarePattern().Matches(code)
-            .SelectMany(m => DeclaredNamePattern().Matches(m.Groups[1].Value).Select(n => n.Groups[1].Value))
+            .SelectMany(m => TopLevelParts(m.Groups[1].Value))
+            .Select(part => DeclaredNamePattern().Match(part))
+            .Where(n => n.Success)
+            .Select(n => n.Groups[1].Value)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    /// <summary>The text split at the commas that are not inside parentheses.</summary>
+    private static IEnumerable<string> TopLevelParts(string text)
+    {
+        var depth = 0;
+        var start = 0;
+        for (var i = 0; i < text.Length; i++)
+        {
+            if (text[i] == '(') depth++;
+            else if (text[i] == ')' && depth > 0) depth--;
+            else if (text[i] == ',' && depth == 0)
+            {
+                yield return text[start..i];
+                start = i + 1;
+            }
+        }
+        yield return text[start..];
     }
 
     /// <summary>The text with string literals and comments blanked out (same length, line breaks kept).</summary>

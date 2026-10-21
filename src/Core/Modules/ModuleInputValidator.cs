@@ -602,6 +602,22 @@ public static partial class ModuleInputValidator
         return errors;
     }
 
+    /// <summary>The same check for the lookup data sources of select filters (display.filters): each must exist and be a Query.</summary>
+    public static IReadOnlyList<string> ValidateFilterLookupSourceKinds(IEnumerable<ModuleFilter> filters, Func<Guid, StatementType?> kindOf)
+    {
+        var errors = new List<string>();
+        foreach (var filter in filters)
+        {
+            if (filter.Type != FormFieldType.Select || filter.Lookup is null || filter.Lookup.DataSourceId == Guid.Empty) continue;
+            var name = filter.Name?.Trim() ?? "";
+            if (kindOf(filter.Lookup.DataSourceId) is not { } kind)
+                errors.Add($"Data source lookup untuk filter '{name}' tidak ditemukan.");
+            else if (kind != StatementType.Query)
+                errors.Add($"Data source lookup untuk filter '{name}' harus berjenis Query.");
+        }
+        return errors;
+    }
+
     private static string Shorten(string text) => text.Length <= 30 ? text : text[..30] + "...";
 }
 

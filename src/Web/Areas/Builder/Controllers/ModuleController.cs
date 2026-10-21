@@ -119,7 +119,11 @@ public class ModuleController(
         }
         catch (ModuleInUseException ex)
         {
-            TempData["Error"] = $"Module '{module.Name}' tidak bisa dihapus: masih dipakai {ex.MenuCount} menu. Hapus atau arahkan ulang menu itu dulu.";
+            var users = new List<string>();
+            if (ex.MenuCount > 0) users.Add($"{ex.MenuCount} menu");
+            if (ex.PageCount > 0) users.Add($"{ex.PageCount} module Page (disematkan)");
+            if (ex.WorkflowCount > 0) users.Add($"{ex.WorkflowCount} workflow (langkah Module)");
+            TempData["Error"] = $"Module '{module.Name}' tidak bisa dihapus: masih dipakai {string.Join(" dan ", users)}. Lepaskan dulu dari sana.";
         }
         catch (ModuleNotFoundException)
         {
@@ -504,18 +508,20 @@ public class ModuleController(
 
     /// <summary>
     /// What is wrong with the Detail / Insert / Update / Delete data sources and with the lookup data sources of select /
-    /// browse fields: gone, or the wrong statement type.
+    /// browse fields and select filters: gone, or the wrong statement type.
     /// </summary>
     private async Task<IReadOnlyList<string>> RecordSourceProblemsAsync(ModuleConfig config, CancellationToken ct)
     {
         var source = config.Source;
-        var hasLookups = config.Form.Fields.Any(f => ModuleFieldValue.IsLookup(f.Type) && f.Lookup is not null);
+        var hasLookups = config.Form.Fields.Any(f => ModuleFieldValue.IsLookup(f.Type) && f.Lookup is not null)
+                         || config.Display.Filters.Any(f => f.Type == FormFieldType.Select && f.Lookup is not null);
         if (!hasLookups && source.Detail is null && source.Insert is null && source.Update is null && source.Delete is null) return [];
 
         var kinds = (await dataSources.ListAsync(ct)).ToDictionary(d => d.Id, d => d.StatementType);
         StatementType? KindOf(Guid id) => kinds.TryGetValue(id, out var kind) ? kind : null;
         return [.. ModuleInputValidator.ValidateRecordSourceKinds(source, KindOf),
-                .. ModuleInputValidator.ValidateLookupSourceKinds(config.Form.Fields, KindOf)];
+                .. ModuleInputValidator.ValidateLookupSourceKinds(config.Form.Fields, KindOf),
+                .. ModuleInputValidator.ValidateFilterLookupSourceKinds(config.Display.Filters, KindOf)];
     }
 
     /// <summary>

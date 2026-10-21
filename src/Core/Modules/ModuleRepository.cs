@@ -138,13 +138,25 @@ VALUES (@id, @name, @type, @description, N'draft', @group, @config, @user, @now)
         await using var conn = await connections.CreateMetadataAsync(ct);
         await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(ct);
 
+        // Besides menus, a Page module embeds another one with {{module:GUID}} in its HTML and a workflow's Module step stores the
+        // id as a JSON string; both are looked for in the JSON text (lower-cased, like the data source delete guard).
         await using (var count = conn.CreateCommand())
         {
             count.Transaction = tx;
-            count.CommandText = "SELECT COUNT(*) FROM rakit.Menus WITH (UPDLOCK, HOLDLOCK) WHERE ModuleId = @id AND IsDeleted = 0";
+            count.CommandText = @"
+SELECT (SELECT COUNT(*) FROM rakit.Menus WITH (UPDLOCK, HOLDLOCK) WHERE ModuleId = @id AND IsDeleted = 0),
+       (SELECT COUNT(*) FROM rakit.Modules p WITH (UPDLOCK, HOLDLOCK)
+        WHERE p.IsDeleted = 0 AND p.Id <> @id AND p.Type = N'page' AND LOWER(p.Config) LIKE @marker),
+       (SELECT COUNT(DISTINCT s.WorkflowId) FROM rakit.Steps s WITH (UPDLOCK, HOLDLOCK)
+        JOIN rakit.Workflows w ON w.Id = s.WorkflowId
+        WHERE w.IsDeleted = 0 AND s.IsDeleted = 0 AND LOWER(s.Data) LIKE @quoted)";
             count.Parameters.Add(new SqlParameter("@id", SqlDbType.UniqueIdentifier) { Value = id });
-            var menus = (int)(await count.ExecuteScalarAsync(ct))!;
-            if (menus > 0) throw new ModuleInUseException(id, menus);
+            count.Parameters.Add(new SqlParameter("@marker", SqlDbType.NVarChar, 60) { Value = "%{{module:" + id.ToString("D") + "}}%" });
+            count.Parameters.Add(new SqlParameter("@quoted", SqlDbType.NVarChar, 50) { Value = "%\"" + id.ToString("D") + "\"%" });
+            await using var reader = await count.ExecuteReaderAsync(ct);
+            await reader.ReadAsync(ct);
+            var (menus, pages, workflows) = (reader.GetInt32(0), reader.GetInt32(1), reader.GetInt32(2));
+            if (menus > 0 || pages > 0 || workflows > 0) throw new ModuleInUseException(id, menus, pages, workflows);
         }
 
         await using var cmd = conn.CreateCommand();

@@ -402,7 +402,8 @@
     }
 
     if (recordForm) {
-        $('record-add').addEventListener('click', openAdd);
+        // the Tambah button is left out when display.buttons.add is off, while the modal stays for Ubah
+        if ($('record-add')) $('record-add').addEventListener('click', openAdd);
         $('record-modal').addEventListener('shown.bs.modal', () => {
             const first = rf.inputs().find((i) => !i.disabled);
             if (first) first.focus();

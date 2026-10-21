@@ -64,7 +64,9 @@ internal static class SqlValues
                 SqlDbType.SmallInt => short.Parse(trimmed, NumberStyles.Integer, culture),
                 SqlDbType.TinyInt => byte.Parse(trimmed, NumberStyles.Integer, culture),
                 SqlDbType.Bit => ParseBit(trimmed),
-                SqlDbType.Decimal or SqlDbType.Money or SqlDbType.SmallMoney => decimal.Parse(trimmed, NumberStyles.Number, culture),
+                // with an exponent, like a form's number field accepts it ("1e3")
+                SqlDbType.Decimal or SqlDbType.Money or SqlDbType.SmallMoney
+                    => decimal.Parse(trimmed, NumberStyles.Number | NumberStyles.AllowExponent, culture),
                 SqlDbType.Float or SqlDbType.Real => double.Parse(trimmed, NumberStyles.Float, culture),
                 SqlDbType.Date or SqlDbType.DateTime or SqlDbType.DateTime2 or SqlDbType.SmallDateTime
                     => DateTime.Parse(trimmed, culture, DateTimeStyles.None),

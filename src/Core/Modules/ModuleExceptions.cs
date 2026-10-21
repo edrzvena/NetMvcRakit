@@ -10,10 +10,16 @@ public sealed class ModuleValidationException(IReadOnlyList<string> errors)
 }
 
 /// <summary>An active menu still points at the module.</summary>
-public sealed class ModuleInUseException(Guid id, int menuCount)
-    : Exception($"Module '{id}' is still used by {menuCount} menu item(s).")
+public sealed class ModuleInUseException(Guid id, int menuCount, int pageCount = 0, int workflowCount = 0)
+    : Exception($"Module '{id}' is still used by {menuCount} menu item(s), {pageCount} page(s) and {workflowCount} workflow(s).")
 {
     public int MenuCount { get; } = menuCount;
+
+    /// <summary>Page modules that embed it.</summary>
+    public int PageCount { get; } = pageCount;
+
+    /// <summary>Workflows with a Module step that opens it.</summary>
+    public int WorkflowCount { get; } = workflowCount;
 }
 
 public sealed class ModuleGroupNotFoundException(Guid id) : Exception($"Module group '{id}' not found.");
