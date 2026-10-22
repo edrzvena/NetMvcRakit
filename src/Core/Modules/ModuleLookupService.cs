@@ -131,7 +131,7 @@ public sealed class ModuleLookupService(
                 $"the lookup result has no column '{(valueIndex < 0 ? lookup.ValueField : lookup.TextField)}'", null);
 
         // A lookup that does not use @Skip / @Take returns every row on every call; its page is taken here (as for a module's list).
-        var unpaged = list.Rows.Count > take || list.Truncated;
+        var unpaged = ModulePaging.IsUnpaged(result, list, take);
         var pageRows = (unpaged ? list.Rows.Skip(skip) : list.Rows).Take(take).ToList();
 
         var items = new List<ModuleLookupItem>();

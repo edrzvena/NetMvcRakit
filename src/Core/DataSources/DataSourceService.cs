@@ -31,6 +31,13 @@ public sealed record DataSourceResult(
     /// <summary>Stored procedures only: the return code (convention: 0 = success). Not thrown as an error; the caller decides. Null when cut short.</summary>
     public int? ReturnValue { get; init; }
 
+    /// <summary>
+    /// True when the data source reads <c>@Skip</c> (a Table data source always does), so the rows are already the requested page;
+    /// false when it does not and returns the same rows whatever page is asked for; null when that was not looked at (a stored
+    /// procedure run that did not ask for a total).
+    /// </summary>
+    public bool? Pages { get; init; }
+
     /// <summary>Index into <see cref="ResultSets"/> of the rows to list (always 0 except for stored procedures that say otherwise).</summary>
     public int ListResultSetIndex { get; init; }
 
@@ -226,7 +233,7 @@ public sealed class DataSourceService(
             total = FirstCellAsInt(count);
         }
 
-        return new DataSourceResult(data.ResultSets, total, data.RowsAffected, data.Duration);
+        return new DataSourceResult(data.ResultSets, total, data.RowsAffected, data.Duration) { Pages = true };
     }
 
     private async Task<DataSourceResult> RunQueryAsync(
@@ -251,15 +258,16 @@ public sealed class DataSourceService(
 
         int? total = null;
         var rewritten = SqlTemplate.Rewrite(sql).Sql;
-        var usesIsCount = SqlTemplate.ReferencedParameters(rewritten).Contains("IsCount", StringComparer.OrdinalIgnoreCase)
-            && !SqlTemplate.DeclaredVariables(rewritten).Contains("IsCount", StringComparer.OrdinalIgnoreCase);
-        if (request.IncludeTotal && usesIsCount && execOptions.StatementType == StatementType.Query)
+        var referenced = SqlTemplate.ReferencedParameters(rewritten);
+        var declared = SqlTemplate.DeclaredVariables(rewritten);
+        bool Reads(string name) => referenced.Contains(name, StringComparer.OrdinalIgnoreCase) && !declared.Contains(name, StringComparer.OrdinalIgnoreCase);
+        if (request.IncludeTotal && Reads("IsCount") && execOptions.StatementType == StatementType.Query)
         {
             var countArgs = new Dictionary<string, object?>(all, StringComparer.OrdinalIgnoreCase) { ["IsCount"] = true };
             total = FirstCellAsInt(await execution.ExecuteQueryAsync(sql, countArgs, execOptions, ct));
         }
 
-        return new DataSourceResult(result.ResultSets, total, result.RowsAffected, result.Duration);
+        return new DataSourceResult(result.ResultSets, total, result.RowsAffected, result.Duration) { Pages = Reads("Skip") };
     }
 
     private async Task<DataSourceResult> RunProcedureAsync(
@@ -279,14 +287,20 @@ public sealed class DataSourceService(
 
         var result = await execution.ExecuteProcedureAsync(proc.Schema, proc.Name, all, execOptions, ct);
 
+        // A list read (it asks for a total) also learns whether the procedure pages, from the parameters it declares.
         int? total = null;
+        bool? pages = null;
         if (request.IncludeTotal && statement == StatementType.Query)
         {
+            var declared = await schemaBrowser.GetProcedureParametersAsync(proc.Schema, proc.Name, ct);
+            bool Declares(string name) => declared.Any(p => string.Equals(p.Name.TrimStart('@'), name, StringComparison.OrdinalIgnoreCase));
+            pages = Declares("Skip");
+
             if (def.CountResultSet is { } countIndex)
             {
                 total = countIndex < result.ResultSets.Count ? FirstCellAsInt(result.ResultSets[countIndex]) : null;
             }
-            else if (await DeclaresParameterAsync(proc, "IsCount", ct))
+            else if (Declares("IsCount"))
             {
                 var countArgs = new Dictionary<string, object?>(all, StringComparer.OrdinalIgnoreCase) { ["IsCount"] = true };
                 var counted = await execution.ExecuteProcedureAsync(proc.Schema, proc.Name, countArgs, execOptions, ct);
@@ -299,13 +313,8 @@ public sealed class DataSourceService(
             OutputParameters = result.OutputParameters,
             ReturnValue = result.ReturnValue,
             ListResultSetIndex = def.ListResultSet,
+            Pages = pages,
         };
-    }
-
-    private async Task<bool> DeclaresParameterAsync(ProcedureReference proc, string parameterName, CancellationToken ct)
-    {
-        var declared = await schemaBrowser.GetProcedureParametersAsync(proc.Schema, proc.Name, ct);
-        return declared.Any(p => string.Equals(p.Name.TrimStart('@'), parameterName, StringComparison.OrdinalIgnoreCase));
     }
 
     private static int? FirstCellAsInt(SqlExecResult result)

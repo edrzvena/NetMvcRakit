@@ -106,6 +106,13 @@ public static class ModuleCsv
     public static string GuardFormula(string text)
         => text.Length > 0 && text[0] is '=' or '+' or '-' or '@' or '\t' or '\r' ? "'" + text : text;
 
+    /// <summary>
+    /// Undoes <see cref="GuardFormula"/> for an imported cell, so an exported file imports back unchanged ("'+62..." → "+62...").
+    /// Only an apostrophe in front of one of those characters is dropped.
+    /// </summary>
+    public static string UnguardFormula(string text)
+        => text.Length > 1 && text[0] == '\'' && text[1] is '=' or '+' or '-' or '@' or '\t' or '\r' ? text[1..] : text;
+
     /// <summary>A database value as a CSV cell, by the column's format: invariant numbers, ISO dates, true / false.</summary>
     public static string Cell(object? value, ColumnFormat format)
     {

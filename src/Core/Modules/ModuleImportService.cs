@@ -67,7 +67,7 @@ public sealed class ModuleImportService(IModuleRuntimeService runtime, IModuleRe
         var seen = new HashSet<ModuleFormField>();
         for (var i = 0; i < header.Count; i++)
         {
-            var title = header[i].Trim();
+            var title = ModuleCsv.UnguardFormula(header[i].Trim());
             if (title.Length == 0) continue;
             if (!byHeader.TryGetValue(title, out var field)) { ignored.Add(title); continue; }
             if (!seen.Add(field)) throw new ModuleImportException($"Kolom untuk field '{field.Name.Trim()}' muncul lebih dari sekali.");
@@ -93,14 +93,14 @@ public sealed class ModuleImportService(IModuleRuntimeService runtime, IModuleRe
             for (var i = 0; i < columnField.Length && i < cells.Count; i++)
             {
                 if (columnField[i] is not { } field) continue;
-                var text = cells[i].Trim();
+                var text = ModuleCsv.UnguardFormula(cells[i].Trim());
                 if (text.Length == 0) continue;
                 values[field.Name.Trim()] = field.Type == FormFieldType.Boolean ? NormalizeBoolean(text) : text;
             }
 
             try
             {
-                await records.InsertAsync(moduleId, values, context, ct);
+                await records.InsertImportedAsync(moduleId, values, context, ct);
                 imported++;
             }
             catch (ModuleRecordValidationException ex)

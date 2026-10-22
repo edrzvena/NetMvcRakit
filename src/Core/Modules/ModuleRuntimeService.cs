@@ -48,6 +48,21 @@ public sealed record ModuleListResult(
     IReadOnlyList<string?>? Keys = null,
     bool Truncated = false);
 
+internal static class ModulePaging
+{
+    /// <summary>
+    /// The rows hold every row rather than the requested page: the data source says it does not read @Skip, or (when that is not
+    /// known) it returned more rows than asked for or was cut at the row cap.
+    /// </summary>
+    public static bool IsUnpaged(DataSourceResult result, DataTableResult list, int take)
+        => result.Pages switch
+        {
+            true => false,
+            false => true,
+            null => list.Rows.Count > take || list.Truncated,
+        };
+}
+
 public interface IModuleRuntimeService
 {
     /// <summary>The module itself, for the page shell. Draft modules are only visible when <paramref name="allowDraft"/> (Builder preview).</summary>
@@ -176,9 +191,9 @@ public sealed class ModuleRuntimeService(
 
         var list = result.List ?? throw Unavailable(module, "the data source returned no result set at the list position", null);
 
-        // A query or procedure that does not use @Skip / @Take returns every row (up to the executor's cap) on every call: more rows
-        // than asked for, or cut at the cap. Its page is then taken here, so page 2 (and an export's next chunk) are not page 1 again.
-        var unpaged = list.Rows.Count > take || list.Truncated;
+        // A query or procedure that does not use @Skip returns every row (up to the executor's cap) on every call. Its page is then
+        // taken here, so page 2 (and an export's next chunk) are not page 1 again, even when it has exactly one page of rows.
+        var unpaged = ModulePaging.IsUnpaged(result, list, take);
         var pageRows = (unpaged ? list.Rows.Skip(skip) : list.Rows).Take(take).ToList();
 
         var columns = BuildColumns(display.Columns, list.Columns, out var indexes);

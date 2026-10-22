@@ -31,13 +31,22 @@ public interface IModuleRecordService
     /// </summary>
     Task<IReadOnlyList<ModuleRecordViewItem>> ViewAsync(Guid moduleId, string key, ParameterContext context, CancellationToken ct = default);
 
-    /// <summary>Validates <paramref name="values"/> against the module's form and runs the Insert data source.</summary>
+    /// <summary>
+    /// Validates <paramref name="values"/> against the module's form and runs the Insert data source. A Table module whose
+    /// Tambah button is switched off (display.buttons.add) does not offer it (<c>NotConfigured</c>), like Ubah and Hapus below.
+    /// </summary>
     /// <exception cref="ModuleNotFoundException"/>
     /// <exception cref="ModuleRecordUnavailableException"/>
     /// <exception cref="ModuleRecordValidationException">A field is invalid, or the database did not accept a value.</exception>
     /// <exception cref="ModuleRecordRejectedException">The procedure returned a non-zero code (rolled back).</exception>
     /// <exception cref="SqlExecutionException"/>
     Task InsertAsync(Guid moduleId, IReadOnlyDictionary<string, string?> values, ParameterContext context, CancellationToken ct = default);
+
+    /// <summary>
+    /// <see cref="InsertAsync"/> for one row of a CSV import: the import is offered by display.menu.import (checked by the import
+    /// service), not by the Tambah button, so that button is not looked at here.
+    /// </summary>
+    Task InsertImportedAsync(Guid moduleId, IReadOnlyDictionary<string, string?> values, ParameterContext context, CancellationToken ct = default);
 
     /// <summary>Like <see cref="InsertAsync"/> for the Update data source, with RouteValue <c>id</c> = <paramref name="key"/>.</summary>
     /// <exception cref="ModuleNotFoundException"/>
@@ -168,12 +177,21 @@ public sealed class ModuleRecordService(
         return list;
     }
 
-    public async Task InsertAsync(
+    public Task InsertAsync(
         Guid moduleId, IReadOnlyDictionary<string, string?> values, ParameterContext context, CancellationToken ct = default)
+        => InsertAsync(moduleId, values, context, imported: false, ct);
+
+    public Task InsertImportedAsync(
+        Guid moduleId, IReadOnlyDictionary<string, string?> values, ParameterContext context, CancellationToken ct = default)
+        => InsertAsync(moduleId, values, context, imported: true, ct);
+
+    private async Task InsertAsync(
+        Guid moduleId, IReadOnlyDictionary<string, string?> values, ParameterContext context, bool imported, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
         var module = await GetPublishedAsync(moduleId, ct);
+        if (!imported) EnsureButton(module, RecordAction.Insert);
         var dataSourceId = SourceOf(module, RecordAction.Insert);
 
         var form = ValidateFields(module, values, forInsert: true);
@@ -186,6 +204,7 @@ public sealed class ModuleRecordService(
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
         var module = await GetPublishedAsync(moduleId, ct);
+        EnsureButton(module, RecordAction.Update);
         var dataSourceId = SourceOf(module, RecordAction.Update);
         var normalizedKey = NormalizeKey(key);
 
@@ -197,6 +216,7 @@ public sealed class ModuleRecordService(
     {
         ArgumentNullException.ThrowIfNull(context);
         var module = await GetPublishedAsync(moduleId, ct);
+        EnsureButton(module, RecordAction.Delete);
         var dataSourceId = SourceOf(module, RecordAction.Delete);
         var normalizedKey = NormalizeKey(key);
 
@@ -257,6 +277,26 @@ public sealed class ModuleRecordService(
             throw new ModuleRecordUnavailableException(
                 "Aksi ini tidak tersedia untuk halaman ini.", $"the module has no {action} data source", notConfigured: true);
         return reference.DataSourceId;
+    }
+
+    /// <summary>
+    /// A Table module's display.buttons switch Tambah / Ubah / Hapus off for the endpoints too, not only on the page (a button that
+    /// is hidden must not still work for whoever posts to its URL). A Form module saves with its own button and has no such switch.
+    /// </summary>
+    private static void EnsureButton(Module module, RecordAction action)
+    {
+        if (module.Type != ModuleType.Table) return;
+        var buttons = module.Config.Display.Buttons;
+        var offered = action switch
+        {
+            RecordAction.Insert => buttons.Add,
+            RecordAction.Update => buttons.Edit,
+            RecordAction.Delete => buttons.Delete,
+            _ => true,
+        };
+        if (!offered)
+            throw new ModuleRecordUnavailableException(
+                "Aksi ini tidak tersedia untuk halaman ini.", $"the module's {action} button is switched off", notConfigured: true);
     }
 
     private ModuleRecordUnavailableException Unavailable(Module module, RecordAction action, string reason, Exception inner)
