@@ -1,487 +1,320 @@
+<div align="center">
+
 # Rakit
 
-Rakit adalah low-code platform untuk membangun aplikasi internal di atas SQL Server. Dengan Rakit, halaman aplikasi (tabel data, form, chart, dashboard) dan workflow disusun lewat Builder, tanpa perlu menulis controller, view, atau page baru untuk setiap kebutuhan.
+**Build internal apps on SQL Server without writing a new page for every screen.**
 
-Nama "Rakit" diambil dari kata *merakit*: aplikasi dibangun dengan merakit komponen yang sudah tersedia, bukan ditulis dari nol.
+[![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
+[![ASP.NET Core MVC](https://img.shields.io/badge/ASP.NET_Core-MVC-512BD4)](https://learn.microsoft.com/aspnet/core/mvc/overview)
+[![SQL Server](https://img.shields.io/badge/SQL_Server-2016_SP1+-CC2927?logo=microsoftsqlserver&logoColor=white)](https://www.microsoft.com/sql-server)
+[![Status](https://img.shields.io/badge/status-early_development-orange)](#roadmap)
 
+[Quick Start](#quick-start) · [Your First Page](#your-first-page) · [Concepts](#concepts) · [Configuration](#configuration) · [Roadmap](#roadmap)
+
+</div>
+
+---
+
+Rakit is a low-code builder for internal applications backed by a single SQL Server database. You describe where the data comes from, how it should look, and what should happen when a button is pressed. Rakit turns that into working pages and workflows.
+
+The name comes from the Indonesian word *merakit*, "to assemble": apps are put together from ready-made parts instead of written from scratch.
+
+```mermaid
+flowchart LR
+    A[(SQL Server)] --> B[Data Source]
+    B --> C[Module]
+    C --> D[Menu]
+    C --> E[Action button]
+    E --> F[Workflow]
+    F --> G[Tracking]
 ```
-SQL Server database
-  └─ Data Source      (table, query, atau stored procedure)
-       └─ Module      (Table, Form, Chart, Widget, Page)
-            └─ Menu   (page muncul di navbar dan bisa dibuka user)
-                 └─ Action / button
-                      └─ Workflow  (step: database, REST, email, script, form, dan lainnya)
-                           └─ Tracking  (history setiap step: success, failed, waiting)
-```
 
-## Table of Contents
+## Why Rakit
 
-1. [Vision & Mission](#vision--mission)
-2. [Features](#features)
-3. [Tech Stack](#tech-stack)
-4. [Requirements](#requirements)
-5. [Getting Started](#getting-started)
-6. [Core Concepts](#core-concepts)
-7. [Tutorial: Your First Page](#tutorial-your-first-page)
-8. [Tutorial: Your First Workflow](#tutorial-your-first-workflow)
-9. [Configuration](#configuration)
-10. [Project Structure](#project-structure)
-11. [Architecture & Security](#architecture--security)
-12. [Testing](#testing)
-13. [Project Status](#project-status)
-14. [Troubleshooting](#troubleshooting)
+Most internal tools are the same handful of screens: a list with search and filters, a form to add or edit a record, a chart, a dashboard, and a few buttons that run a process. Rakit lets you configure those screens instead of coding them, while keeping SQL Server, and especially stored procedures, at the center.
 
-## Vision & Mission
-
-### Vision
-
-Membuat pengembangan aplikasi internal berbasis data cukup cepat sehingga sebuah kebutuhan bisnis bisa diwujudkan dalam hitungan jam, bukan minggu, tanpa mengorbankan keamanan dan keteraturan database.
-
-### Mission
-
-1. **Development yang lebih cepat.** Page CRUD, report, chart, dan dashboard dibangun dari konfigurasi, bukan dari kode yang ditulis berulang.
-2. **SQL Server sebagai pusat.** Rakit fokus pada satu database SQL Server dan menjadikan stored procedure sebagai fitur utama yang bisa dipilih langsung dari Builder.
-3. **Secure by default.** Semua nilai dikirim sebagai SQL parameter (tanpa string concatenation), stored procedure harus masuk whitelist, setiap jenis akses memakai database user dengan permission minimum, dan fitur yang berisiko (raw query, write) nonaktif secara default.
-4. **Mudah dipelajari.** Alurnya konsisten: buat data source, atur tampilannya di module, pasang di menu, lalu tambahkan workflow bila perlu.
-5. **Mudah ditelusuri.** Setiap step workflow tercatat, sehingga mudah melihat apa yang berjalan, apa yang gagal, dan kenapa.
+- **Fast.** CRUD pages, reports, charts and dashboards come from configuration, not boilerplate.
+- **SQL Server first.** One database, with stored procedures as a first-class data source.
+- **Secure by default.** Parameterized SQL only, a stored procedure whitelist, least-privilege database users, and risky features switched off until you turn them on.
+- **Traceable.** Every workflow run is recorded step by step.
 
 ## Features
 
-| Area | Fitur |
-|---|---|
-| **Data Source** | Tiga mode: *Table* (pilih table atau view, kolom, filter), *Query* (SQL dengan parameter), dan *Stored Procedure* (input, output, return value, multiple result set). Nilai parameter bisa diambil dari query string, form, route, constant, atau output step workflow. Ada preview hasil. |
-| **Module** | Lima tipe: **Table** (list dengan search, filter, sort, paging, add, edit, delete, detail view, CSV export dan import), **Form** (form input mandiri), **Chart** (bar, line, area, pie, doughnut), **Widget** (angka ringkasan atau KPI), dan **Page** (HTML page yang bisa meng-embed module lain, cocok untuk dashboard). |
-| **Form field** | text, textarea, number, date, dateTime, boolean, email, url, select (opsi tetap atau dari data source), browse (picker dengan search), dan section (judul pemisah). Mendukung required, max length, regex, serta min dan max. |
-| **Wizard "Buat dari tabel"** | Pilih satu table, lalu Rakit membuat data source List, Detail, Insert, Update, dan Delete beserta stored procedure CRUD-nya, sekaligus mengisi kolom Display dan field Form. |
-| **Menu** | Navbar dua level dengan folder dan separator. Item menu bisa mengarah ke module atau URL. |
-| **Workflow** | Visual canvas dengan step: Data Source, REST, Email, Page (tampilkan HTML), Module (redirect ke page lain), Condition (branching), Javascript (script di server-side sandbox), dan Form (minta input user di tengah proses). Mendukung satu SQL transaction untuk seluruh workflow. |
-| **Tracking** | Summary jumlah run success, failed, dan waiting, chart per hari, serta detail setiap step dari setiap run. |
-| **SQL Playground** | SQL editor dengan tab, object explorer, tampilan struktur table, dan table designer. Default-nya read-only dan selalu di-rollback. |
-| **Admin** | Whitelist stored procedure dan halaman Health untuk mengecek koneksi database. |
+- [x] **Data sources** from a table or view, a parameterized query, or a stored procedure (input, output, return value, multiple result sets)
+- [x] **Table** module with search, filters, sorting, paging, add, edit, delete, detail view, and CSV export and import
+- [x] **Form**, **Chart**, **Widget** and **Page** modules, where a Page can embed other modules to build a dashboard
+- [x] **"Buat dari tabel" wizard** that generates the data sources, CRUD procedures, columns and form from one table
+- [x] **Two-level menu** with folders and separators
+- [x] **Workflows** on a visual canvas: Data Source, REST, Email, Page, Module, Condition, Javascript and Form steps, with an optional single SQL transaction
+- [x] **Tracking** of every run with per-day charts and step details
+- [x] **SQL Playground** with tabs, an object explorer and a table designer (read-only by default)
+- [ ] Authentication and role-based access
+- [ ] Scheduled workflows
+- [ ] Audit log
 
 ## Tech Stack
 
-### Backend
-
-| Component | Version |
+| Layer | Technology |
 |---|---|
-| .NET SDK | 10.0.301 |
-| Target framework | `net10.0` |
-| ASP.NET Core MVC (Razor Views) | 10.0 |
-| Microsoft.Data.SqlClient | 7.1.1 |
-| dbup-sqlserver (database migration) | 7.2.0 |
-| HtmlSanitizer | 9.2.1039 |
-| Jint (Javascript engine untuk step Javascript) | 4.17.0 |
-| MailKit (email) | 4.18.1 |
-| System.Security.Cryptography.Pkcs (di-pin karena vulnerability pada versi transitive) | 10.0.13 |
+| Runtime | .NET 10 (SDK 10.0.301), ASP.NET Core MVC with Razor views |
+| Database | SQL Server 2016 SP1 or later (tested on SQL Server 2025 Express 17.0) |
+| Data access | ADO.NET with Microsoft.Data.SqlClient 7.1.1 (no ORM) |
+| Migrations | DbUp (dbup-sqlserver 7.2.0) |
+| Workflow engine | Jint 4.17.0 (Javascript sandbox), MailKit 4.18.1 (email), HtmlSanitizer 9.2.1039 |
+| Frontend | Bootstrap 5.3.3, Bootstrap Icons 1.11.3, jQuery 3.7.1, Chart.js 4.4.7, Ace Editor 1.36.5 |
+| Testing | xUnit 2.9.3, Microsoft.NET.Test.Sdk 17.14.1 |
 
-Data access memakai ADO.NET langsung, tanpa Entity Framework.
+All frontend libraries are vendored in `src/Web/wwwroot/lib`, so no Node.js or CDN is required.
 
-### Database
+## Quick Start
 
-| Component | Version |
-|---|---|
-| Microsoft SQL Server | Minimal 2016 SP1. Dikembangkan dan dites dengan SQL Server 2025 Express (17.0.1000.7). |
+### Prerequisites
 
-### Frontend
+- Windows 10/11 or Windows Server
+- [.NET SDK 10.0](https://dotnet.microsoft.com/download)
+- SQL Server 2016 SP1 or later (Express is enough), reachable as `.\SQLEXPRESS` by default
+- A Windows account that can create databases on that instance
 
-Semua library sudah ada di `src/Web/wwwroot/lib`, jadi tidak perlu CDN atau `npm install`.
+### Run it
 
-| Library | Version |
-|---|---|
-| Bootstrap | 5.3.3 |
-| Bootstrap Icons | 1.11.3 |
-| jQuery | 3.7.1 |
-| jQuery Validation | 1.21.0 |
-| jQuery Validation Unobtrusive | 4.0.0 |
-| Chart.js | 4.4.7 |
-| Ace Editor | 1.36.5 |
-| Inter (font) | variable font, latin dan latin-ext |
-
-### Testing
-
-| Component | Version |
-|---|---|
-| xUnit | 2.9.3 |
-| xunit.runner.visualstudio | 3.1.4 |
-| Microsoft.NET.Test.Sdk | 17.14.1 |
-| coverlet.collector | 6.0.4 |
-
-## Requirements
-
-Sebelum menjalankan Rakit, pastikan sudah terpasang:
-
-1. **Windows 10/11** atau Windows Server. Config default memakai Windows Authentication ke SQL Server.
-2. **.NET SDK 10.0** (10.0.301 atau lebih baru). Download di [dotnet.microsoft.com](https://dotnet.microsoft.com/download). Cek dengan:
-   ```
-   dotnet --version
-   ```
-3. **SQL Server 2016 SP1 atau lebih baru.** Edisi Express sudah cukup. Config default mengarah ke instance `.\SQLEXPRESS`.
-4. **Git**, untuk clone repository.
-5. **sqlcmd** (opsional), untuk menjalankan sample data tambahan.
-6. Akun Windows yang dipakai harus bisa **create database** di instance tersebut (misalnya punya role `sysadmin` atau `dbcreator`). Pada SQL Server Express yang di-install sendiri, akun yang meng-install biasanya sudah punya permission ini.
-
-## Getting Started
-
-### 1. Clone repository
-
-```
+```bash
+# 1. Clone
 git clone https://github.com/edrzvena/NetMvcRakit.git
 cd NetMvcRakit
-```
 
-### 2. Restore dan build
-
-```
-dotnet restore Rakit.slnx
-dotnet build Rakit.slnx
-```
-
-### 3. Jalankan database migration
-
-Migration akan membuat database `Rakit` kalau belum ada, lalu membuat schema, table metadata, database user, dan sample data.
-
-```
+# 2. Create the database and apply all migrations
 dotnet run --project db/Rakit.Migrations
-```
 
-Kalau SQL Server Anda bukan `.\SQLEXPRESS`, berikan connection string sebagai argument:
-
-```
-dotnet run --project db/Rakit.Migrations "Server=NAMA_SERVER;Database=Rakit;Integrated Security=true;TrustServerCertificate=true"
-```
-
-Migration aman dijalankan berulang kali. Script yang sudah dijalankan tercatat di table `dbo.SchemaVersions` dan tidak akan dijalankan ulang.
-
-### 4. (Opsional) Sample data tambahan
-
-File `db/Samples/sample-data.sql` berisi 21 table dan 2 view contoh (karyawan, produk, order, project, perpustakaan, dan lainnya) di schema `app`. File ini bukan migration dan aman dijalankan ulang.
-
-```
-sqlcmd -S .\SQLEXPRESS -d Rakit -C -I -E -i db\Samples\sample-data.sql
-```
-
-### 5. Jalankan aplikasi
-
-```
+# 3. Start the app
 dotnet run --project src/Web
 ```
 
-Buka **http://localhost:5247** di browser.
+Open **http://localhost:5247**.
 
-Command di atas otomatis memakai environment `Development` (diatur di `src/Web/Properties/launchSettings.json`). Connection string default ada di `src/Web/appsettings.Development.json`. Kalau nama SQL Server Anda berbeda, ubah kedua value di file tersebut (`Metadata` dan `Execution`).
+Using a different SQL Server instance? Pass the connection string to the migration runner and update `ConnectionStrings` in `src/Web/appsettings.Development.json`:
 
-### 6. Aktifkan write (untuk mencoba add, edit, delete)
+```bash
+dotnet run --project db/Rakit.Migrations "Server=YOUR_SERVER;Database=Rakit;Integrated Security=true;TrustServerCertificate=true"
+```
 
-Default-nya Rakit berjalan dalam mode aman: data hanya bisa dibaca. Untuk mencoba fitur write di komputer development, set dua environment variable berikut sebelum menjalankan aplikasi.
+### Enable writes (optional)
 
-PowerShell:
+Rakit starts in read-only mode. To try add, edit and delete on your development machine:
 
 ```powershell
+# PowerShell
 $env:Rakit__Db__AllowWrite = "true"
 $env:Rakit__Playground__AllowWrite = "true"
 dotnet run --project src/Web
 ```
 
-Command Prompt:
+> [!WARNING]
+> Rakit has no login yet. Keep writes off, and never expose the app to the internet.
 
-```
-set Rakit__Db__AllowWrite=true
-set Rakit__Playground__AllowWrite=true
-dotnet run --project src/Web
-```
+### Sample data (optional)
 
-Git Bash:
+The migrations already create a small `app.Customers` table. For a richer playground with 21 tables and 2 views:
 
 ```bash
-Rakit__Db__AllowWrite=true Rakit__Playground__AllowWrite=true dotnet run --project src/Web
+sqlcmd -S .\SQLEXPRESS -d Rakit -C -I -E -i db/Samples/sample-data.sql
 ```
 
-| Environment variable | Fungsi |
-|---|---|
-| `Rakit__Db__AllowWrite` | Mengizinkan data source dengan statement *Command* (add, edit, delete dari page dan workflow). |
-| `Rakit__Playground__AllowWrite` | Mengizinkan Playground melakukan commit dan mengizinkan wizard "Buat dari tabel" membuat stored procedure. |
+## Your First Page
 
-Jangan aktifkan keduanya di server yang bisa diakses orang lain.
+This walkthrough builds a customer list with add, edit and delete on top of `app.Customers`. Start the app with writes enabled first.
 
-## Core Concepts
+1. Open **Builder > Module** and click **Module baru**.
+2. Name it `Customers` and choose the **Table** type.
+3. Click **Buat dari tabel...**, pick `app.Customers`, review the columns and click **Terapkan**.
+4. Click **Simpan**. The module is saved as a draft.
+5. Back in the module list, click **Publish**.
+6. Open **Builder > Menu**, add a menu item, set its target to the `Customers` module and save.
 
-Sebelum mulai, pahami dulu istilah-istilah berikut. Setiap istilah adalah satu layer di Rakit, dan setiap layer dibangun di atas layer sebelumnya.
+The new menu item now appears in the top bar and opens your page at `/object/page/{moduleId}`.
 
-| Term | Penjelasan | Contoh |
-|---|---|---|
-| **Schema `app`** | Tempat data bisnis Anda (table, view, stored procedure). | `app.Customers` |
-| **Schema `rakit`** | Tempat Rakit menyimpan metadata-nya sendiri. Jangan diubah manual. | `rakit.Modules` |
-| **Data Source** | Definisi cara mengambil atau mengubah data: dari table mana, query apa, atau stored procedure apa, dan dari mana value parameternya. | "List customer", "Insert customer" |
-| **Statement Query / Command** | *Query* hanya membaca data. *Command* mengubah data dan butuh `AllowWrite`. | List = Query, Insert = Command |
-| **Module** | Bentuk tampilan dari sebuah data source. | Table customer, form registrasi, chart penjualan |
-| **Draft / Published** | Module dan workflow baru selalu berstatus *Draft* dan belum bisa dibuka user. Setelah di-*Publish*, baru aktif. | |
-| **Menu** | Link di navbar yang mengarah ke module atau URL. | Menu "Pelanggan" |
-| **Workflow** | Rangkaian step yang dijalankan saat user menekan sebuah button. | Simpan order, lalu kirim email konfirmasi |
-| **Placeholder** | Penanda `{{...}}` untuk menyisipkan value ke dalam teks step workflow. | `{{form.Email}}`, `{{key}}`, `{{simpan.row.Id}}` |
-| **Tracking** | History setiap kali workflow dijalankan. | "Run 22 Okt failed di step kirim-email" |
-| **SP Whitelist** | Daftar stored procedure yang boleh dipakai. Stored procedure di luar daftar ini selalu ditolak. | `app.SpCustomers_Insert` |
+<details>
+<summary><b>What the wizard did for you</b></summary>
 
-Singkatnya, alur kerja di Rakit selalu sama:
+- Created five data sources: `customers-list`, `customers-detail`, `customers-insert`, `customers-update` and `customers-delete`.
+- Created the CRUD stored procedures if they did not exist yet (existing ones, such as `app.SpCustomers_Insert` from the migrations, are reused and never overwritten) and added them to the whitelist.
+- Filled in the Display columns, the key field and the Form fields.
 
-1. Siapkan **data** di schema `app`.
-2. Buat **Data Source** untuk membaca atau mengubah data tersebut.
-3. Buat **Module** untuk menampilkannya.
-4. **Publish** module tersebut.
-5. Pasang di **Menu** supaya mudah dibuka.
-6. Kalau butuh proses tambahan, buat **Workflow** dan pasang sebagai button di module.
+You can build the same thing by hand: create a data source in **Builder > Data Source**, then a Table module that uses it on the **Source** tab, configure the **Display** and **Form** tabs, and publish.
 
-## Tutorial: Your First Page
+</details>
 
-Tutorial ini membuat page list customer lengkap dengan add, edit, dan delete, memakai table sample `app.Customers` yang dibuat oleh migration.
+<details>
+<summary><b>Next: add a workflow button</b></summary>
 
-**Persiapan:** jalankan aplikasi dengan `AllowWrite` aktif seperti di [step 6](#6-aktifkan-write-untuk-mencoba-add-edit-delete).
-
-### Cara cepat: wizard "Buat dari tabel"
-
-1. Buka **http://localhost:5247**, lalu pilih **Builder > Module** di sidebar.
-2. Klik **Module baru**, isi nama (misalnya `Pelanggan`), dan pilih tipe **Table**.
-3. Klik **Buat dari tabel...**, lalu pilih table `app.Customers`.
-4. Cek kolom yang ditampilkan dan field form yang disarankan, lalu klik **Terapkan**. Rakit akan:
-   - membuat data source `customers-list`, `customers-detail`, `customers-insert`, `customers-update`, dan `customers-delete`;
-   - membuat stored procedure CRUD kalau belum ada (stored procedure yang sudah ada, seperti `app.SpCustomers_Insert` dari migration, dipakai apa adanya dan tidak di-overwrite), lalu memasukkannya ke whitelist;
-   - mengisi tab Display (kolom) dan tab Form (field).
-5. Klik **Simpan**. Module tersimpan sebagai **Draft**.
-6. Kembali ke list module, lalu klik icon **Publish** pada module `Pelanggan`.
-7. Buka **Builder > Menu**, tambahkan menu baru dengan label `Pelanggan`, pilih target **Module**, lalu pilih module `Pelanggan`.
-8. Menu `Pelanggan` sekarang muncul di navbar. Klik untuk membuka page-nya. URL page berbentuk `/object/page/{module-id}`.
-
-### Cara manual: memahami setiap layer
-
-Cara ini lebih panjang, tapi membantu memahami apa yang dikerjakan wizard di belakang layar.
-
-1. **Buat data source untuk list.** Buka **Builder > Data Source**, buat data source baru:
-   - Mode: **Table**, pilih `app.Customers`;
-   - Statement: **Query**;
-   - Klik **Preview** untuk memastikan data muncul, lalu simpan.
-2. **Buat module.** Buka **Builder > Module**, buat module tipe **Table**:
-   - Tab **Source**: pilih data source dari step 1 sebagai *List*;
-   - Tab **Display**: load kolom, atur label, format, dan kolom yang bisa di-sort; isi **key field** (misalnya `Id`) kalau nanti butuh button edit atau delete;
-   - Tab **Preview**: lihat hasilnya sebelum disimpan.
-3. **Tambahkan write (opsional).** Buat data source dengan statement **Command** untuk Insert, Update, dan Delete (biasanya memakai stored procedure), pilih di tab Source, lalu tambahkan field di tab **Form**. Stored procedure baru harus didaftarkan dulu di **Admin > SP Whitelist**.
-4. **Publish** module dan **pasang di Menu** seperti di cara cepat.
-
-### Module type lainnya
-
-| Type | Kapan dipakai |
-|---|---|
-| **Form** | Page input mandiri, misalnya form registrasi. Hanya untuk insert data. |
-| **Chart** | Chart dari data source yang mengembalikan kolom label dan value. |
-| **Widget** | Satu angka penting, misalnya total penjualan hari ini. |
-| **Page** | HTML page bebas. Embed module lain dengan marker `{{module:MODULE-ID}}` untuk membuat dashboard. Hanya module Table, Form, Chart, dan Widget yang bisa di-embed, maksimal 10 per page. |
-
-## Tutorial: Your First Workflow
-
-Contoh berikut menambahkan button **Kirim Sapaan** di setiap baris table customer, yang menampilkan pesan berisi data customer tersebut.
-
-1. Buka **Builder > Workflow**, buat workflow baru dengan code `sapa-pelanggan`.
-2. Di canvas, tambahkan step **Data Source** dengan code `ambil`. Pilih data source detail customer (`customers-detail`). Parameter `id` otomatis terisi dari key baris yang diklik.
-3. Tambahkan step **Page** dengan isi HTML berikut, lalu sambungkan dari step `ambil`:
+1. Open **Builder > Workflow** and create a workflow with the code `greet-customer`.
+2. Add a **Data Source** step with the code `fetch` that uses `customers-detail`. Its `id` parameter is filled with the key of the clicked row.
+3. Add a **Page** step after it:
    ```html
-   <h5>Halo, {{ambil.row.Name}}</h5>
-   <p>Email terdaftar: {{ambil.row.Email}}</p>
+   <h5>Hello, {{fetch.row.Name}}</h5>
+   <p>Registered email: {{fetch.row.Email}}</p>
    ```
-4. Klik **Periksa** untuk validasi, simpan, lalu **Publish**.
-5. Buka module `Pelanggan`, tambahkan button di bagian **Aksi**:
-   - Code: `sapa`, Label: `Kirim Sapaan`;
-   - Workflow: `sapa-pelanggan`;
-   - Centang **per baris**.
-6. Simpan dan buka page customer. Setiap baris sekarang punya button **Kirim Sapaan**.
-7. Buka **Builder > Tracking** untuk melihat history run beserta status setiap step.
+4. Click **Periksa** to validate, save, then publish.
+5. In the `Customers` module, add an action under **Aksi**, select `greet-customer` and tick **per baris**.
 
-Nama kolom pada `{{ambil.row.Name}}` dan `{{ambil.row.Email}}` mengikuti kolom yang dikembalikan data source. Sesuaikan kalau table Anda berbeda.
+Every row now has a button that shows the customer's details. Each run is listed in **Builder > Tracking**.
 
-### Workflow step types
+</details>
 
-| Step | Fungsi | Output untuk step berikutnya |
+## Concepts
+
+| Concept | What it is |
+|---|---|
+| **Data Source** | How data is read or changed: a table, a query or a stored procedure, plus where each parameter value comes from. *Query* statements only read. *Command* statements write and need `AllowWrite`. |
+| **Module** | How a data source is shown: Table, Form, Chart, Widget or Page. |
+| **Draft / Published** | New modules and workflows are drafts. Only published ones are visible to users. |
+| **Menu** | The navigation bar. Items point to a module or a URL. |
+| **Workflow** | Steps that run when a button is pressed. Steps pass values to each other with placeholders such as `{{form.Email}}`, `{{key}}` and `{{fetch.row.Id}}`. |
+| **Tracking** | The history of every workflow run, step by step. |
+| **SP Whitelist** | The stored procedures Rakit may run. Anything else is refused. |
+
+Business data lives in the `app` schema. Rakit keeps its own metadata in the `rakit` schema, which you should not edit by hand.
+
+<details>
+<summary><b>Workflow steps</b></summary>
+
+| Step | What it does | Outputs |
 |---|---|---|
-| **Data Source** | Menjalankan data source (query atau stored procedure). | `{{code.row.Column}}`, `{{code.out.Parameter}}`, `{{code.return}}` |
-| **REST** | Memanggil API eksternal. Host tujuan harus terdaftar di `Rakit:Workflow:AllowedHosts`. | `{{code.status}}`, `{{code.body}}`, `{{code.json.path.to.value}}` |
-| **Email** | Mengirim email lewat SMTP. Kalau SMTP belum di-config, email hanya dicatat di log. | `{{code.sent}}` |
-| **Page** | Menampilkan HTML ke user di modal. | |
-| **Module** | Redirect user ke page module lain, bisa membawa parameter. | |
-| **Condition** | Memilih branch *true* atau *false* berdasarkan perbandingan value. | |
-| **Javascript** | Menjalankan script di server-side sandbox (dibatasi timeout, memory, dan jumlah statement). | `{{code.body}}`, `{{code.json.path}}` |
-| **Form** | Menghentikan sementara workflow dan meminta user mengisi form. Berlaku 30 menit. | `{{code.button}}`, `{{code.form.FieldName}}` |
+| Data Source | Runs a query or stored procedure | `{{code.row.Column}}`, `{{code.out.Param}}`, `{{code.return}}` |
+| REST | Calls an external API on an allowed host | `{{code.status}}`, `{{code.body}}`, `{{code.json.path}}` |
+| Email | Sends an email over SMTP | `{{code.sent}}` |
+| Page | Shows HTML to the user | |
+| Module | Sends the user to another module | |
+| Condition | Branches on a comparison | |
+| Javascript | Runs a script in a server-side sandbox | `{{code.body}}`, `{{code.json.path}}` |
+| Form | Pauses the run and asks the user for input (valid for 30 minutes) | `{{code.button}}`, `{{code.form.Field}}` |
 
-Placeholder yang selalu tersedia: `{{form.FieldName}}` (value form), `{{key}}` (key baris), `{{claim.name}}`, dan `{{now}}` (waktu saat ini).
+Always available: `{{form.Field}}`, `{{key}}`, `{{claim.name}}` and `{{now}}`.
+
+</details>
 
 ## Configuration
 
-Semua config ada di `src/Web/appsettings.json` dan `src/Web/appsettings.Development.json`. Setiap key juga bisa di-override lewat environment variable dengan mengganti `:` menjadi `__` (dua underscore), misalnya `Rakit:Db:AllowWrite` menjadi `Rakit__Db__AllowWrite`.
+Settings live in `src/Web/appsettings.json` and `appsettings.Development.json`. Any key can be overridden with an environment variable by replacing `:` with `__`, for example `Rakit__Db__AllowWrite`.
 
-### Connection strings
+| Key | Default | Description |
+|---|---|---|
+| `Rakit:Db:AllowWrite` | `false` | Allow *Command* data sources (add, edit, delete) |
+| `Rakit:Db:AllowRawQuery` | `false` | Allow data sources written as raw SQL |
+| `Rakit:Db:AllowStoredProcedure` | `true` | Allow stored procedure data sources |
+| `Rakit:Db:AllowedSchemas` | `["app"]` | Schemas data sources may use |
+| `Rakit:Playground:Enabled` | `false` (`true` in Development) | Show the SQL Playground |
+| `Rakit:Playground:AllowWrite` | `false` | Let the Playground commit and the wizard create procedures |
+| `Rakit:Workflow:AllowedHosts` | `[]` | Hosts a REST step may call, e.g. `api.example.com` |
+| `Rakit:Mail:Host` | empty | SMTP server. When empty, emails are only logged |
+| `Rakit:Security:BuilderLocalOnly` | `true` | Builder and Admin only open from the server itself |
 
-| Key | Fungsi |
+<details>
+<summary><b>All settings</b></summary>
+
+**Connection strings**
+
+| Key | Description |
 |---|---|
-| `ConnectionStrings:Metadata` | Koneksi untuk membaca dan menyimpan metadata Rakit (schema `rakit`). |
-| `ConnectionStrings:Execution` | Koneksi untuk menjalankan data source (schema `app`). Wajib memakai `Pooling=false`. |
+| `ConnectionStrings:Metadata` | Reads and writes Rakit's metadata (`rakit` schema) |
+| `ConnectionStrings:Execution` | Runs data sources (`app` schema). Must include `Pooling=false` |
 
-### Rakit:Db
+**Rakit:Playground**
 
-| Key | Default | Fungsi |
-|---|---|---|
-| `AllowedSchemas` | `["app"]` | Schema yang boleh diakses data source. |
-| `AllowRawQuery` | `false` | Mengizinkan data source mode *Query* (raw SQL). |
-| `AllowWrite` | `false` | Mengizinkan statement *Command* (write data). |
-| `AllowStoredProcedure` | `true` | Mengizinkan data source mode *Stored Procedure*. |
+| Key | Default |
+|---|---|
+| `MaxRows` | `1000` |
+| `TimeoutSeconds` | `30` |
+| `MaxScriptLength` | `200000` |
 
-### Rakit:Playground
+**Rakit:Workflow:Script** (Javascript step sandbox)
 
-| Key | Default | Fungsi |
-|---|---|---|
-| `Enabled` | `false` (`true` di Development) | Menampilkan SQL Playground. |
-| `AllowWrite` | `false` | Mengizinkan Playground melakukan commit dan wizard membuat stored procedure. |
-| `MaxRows` | `1000` | Jumlah row maksimal per result. |
-| `TimeoutSeconds` | `30` | Timeout eksekusi script. |
-| `MaxScriptLength` | `200000` | Panjang script maksimal (karakter). |
+| Key | Default |
+|---|---|
+| `TimeoutMs` | `500` |
+| `MemoryLimitMb` | `16` |
+| `MaxStatements` | `100000` |
+| `MaxRecursion` | `100` |
+| `MaxResultBytes` | `65536` |
 
-### Rakit:Workflow
+**Rakit:Mail**
 
-| Key | Default | Fungsi |
-|---|---|---|
-| `AllowedHosts` | `[]` | Host yang boleh dipanggil step REST, misalnya `api.example.com` (semua port) atau `localhost:5099` (port itu saja). Kosong berarti step REST tidak bisa berjalan. |
-| `Script:TimeoutMs` | `500` | Timeout step Javascript. |
-| `Script:MemoryLimitMb` | `16` | Memory limit step Javascript. |
-| `Script:MaxStatements` | `100000` | Jumlah statement maksimal yang dieksekusi. |
-| `Script:MaxRecursion` | `100` | Kedalaman recursion maksimal. |
-| `Script:MaxResultBytes` | `65536` | Ukuran result script maksimal. |
+| Key | Default |
+|---|---|
+| `Host` / `Port` | empty / `25` |
+| `Security` | `StartTlsWhenAvailable` |
+| `User` / `Password` | empty (use user secrets or environment variables) |
+| `From` / `FromName` | empty / `Rakit` |
 
-### Rakit:Mail
+</details>
 
-| Key | Default | Fungsi |
-|---|---|---|
-| `Host`, `Port` | kosong, `25` | SMTP server. Kalau `Host` kosong, email hanya dicatat di log. |
-| `Security` | `StartTlsWhenAvailable` | Mode security koneksi SMTP. |
-| `User`, `Password` | kosong | SMTP credentials. Simpan di user secrets atau environment variable, jangan di file yang di-commit. |
-| `From`, `FromName` | kosong, `Rakit` | Alamat dan nama pengirim. |
+## Security
 
-### Rakit:Security
+Rakit connects with your Windows identity, then switches each connection to a login-less database user with only the permissions it needs:
 
-| Key | Default | Fungsi |
-|---|---|---|
-| `BuilderLocalOnly` | `true` | Builder dan Admin hanya bisa dibuka dari komputer tempat aplikasi berjalan. Request dari komputer lain mendapat HTTP 403. |
+| User | Can |
+|---|---|
+| `rakit_app` | Manage the `rakit` schema and read object definitions in `app` |
+| `rakit_exec` | SELECT and EXECUTE in `app`, with no access to `rakit` |
+| `rakit_play_ro` / `rakit_play` | Run Playground scripts, read-only or read-write |
+
+On top of that:
+
+- User input is always sent as SQL parameters, never concatenated into SQL.
+- Stored procedures must be on the whitelist, checked on every call.
+- Raw *Query* data sources are rolled back after they are read.
+- Writes use anti-forgery tokens, and disabled buttons are refused by the server too.
+- HTML from Page modules and workflow steps is sanitized.
+- REST steps only reach allowed hosts and never follow redirects.
+- Javascript steps run with time, memory and statement limits.
 
 ## Project Structure
 
 ```
 NetMvcRakit/
-├── Rakit.slnx                      Solution
 ├── db/
-│   ├── Rakit.Migrations/           Migration runner (DbUp)
-│   │   └── Scripts/                SQL script berurutan: 0001_schemas.sql, 0002_..., dst.
-│   └── Samples/
-│       └── sample-data.sql         Sample data tambahan (bukan migration)
+│   ├── Rakit.Migrations/   DbUp migration runner and SQL scripts
+│   └── Samples/            Optional sample data
 ├── src/
-│   ├── Core/                       Business logic, tanpa dependency ke UI
-│   │   ├── Config/                 Options class (Rakit:Db, Rakit:Playground)
-│   │   ├── Data/                   Connection factory
-│   │   ├── DataSources/            Data source: model, repository, execution, parameter resolver
-│   │   ├── Health/                 Database health check
-│   │   ├── Modules/                Module, menu, form, CSV export/import, table wizard
-│   │   ├── Playground/             SQL Playground dan object catalog
-│   │   ├── Procedures/             Stored procedure whitelist
-│   │   ├── Schema/                 Schema browser
-│   │   ├── Sql/                    Parameterized SQL execution, template, transaction
-│   │   └── Workflows/              Workflow: model, validator, runner, step, tracking
-│   └── Web/                        ASP.NET Core MVC app
-│       ├── Areas/
-│       │   ├── Admin/              SP Whitelist dan Health
-│       │   ├── Builder/            Module, Workflow, Tracking, Data Source, Menu, Playground
-│       │   └── Object/             Runtime page yang dibuka user (/object/page/{id})
-│       ├── Security/               Pembatasan akses Builder dan security headers
-│       ├── Views/                  Layout dan home page
-│       └── wwwroot/                CSS, Javascript, dan frontend library
+│   ├── Core/               Data sources, modules, workflows, SQL execution
+│   └── Web/                ASP.NET Core MVC app
+│       └── Areas/
+│           ├── Builder/    Module, Workflow, Tracking, Data Source, Menu, Playground
+│           ├── Admin/      SP Whitelist, Health
+│           └── Object/     Runtime pages (/object/page/{id})
 └── tests/
-    └── Rakit.Core.Tests/           xUnit tests
+    └── Rakit.Core.Tests/   xUnit tests
 ```
-
-## Architecture & Security
-
-### Satu database, dua schema
-
-Rakit memakai satu database SQL Server yang dipisah menjadi dua schema:
-
-- **`rakit`** menyimpan metadata: data source, module, menu, workflow, tracking, dan whitelist.
-- **`app`** menyimpan data bisnis beserta stored procedure-nya.
-
-### Database user dengan least privilege
-
-Aplikasi terhubung dengan Windows identity, lalu di setiap koneksi berpindah ke database user tanpa login (`EXECUTE AS USER ... WITH NO REVERT`):
-
-| User | Permission |
-|---|---|
-| `rakit_app` | Mengelola schema `rakit` dan membaca definisi object di `app`. |
-| `rakit_exec` | SELECT dan EXECUTE di schema `app`. Tidak punya akses ke schema `rakit`. |
-| `rakit_play_ro` | Playground mode read-only. |
-| `rakit_play` | Playground mode write (hanya kalau `Rakit:Playground:AllowWrite` aktif). |
-
-Dengan pemisahan ini, query dari sebuah data source tidak bisa membaca atau mengubah metadata Rakit.
-
-### Proteksi lainnya
-
-- Semua input user dikirim sebagai SQL parameter, tidak pernah digabung ke teks SQL.
-- Stored procedure wajib ada di whitelist dan dicek di setiap eksekusi.
-- Data source raw query dengan statement *Query* selalu di-rollback setelah dibaca.
-- Write, raw query, dan Playground write nonaktif secara default.
-- Setiap aksi write memakai anti-forgery token.
-- HTML di module Page di-sanitize dengan HtmlSanitizer saat disimpan dan saat di-render; HTML dari step Page dan Email di-sanitize setiap kali workflow berjalan.
-- Step REST hanya boleh memanggil host yang terdaftar dan tidak mengikuti redirect.
-- Step Javascript berjalan di sandbox dengan batas timeout, memory, dan jumlah statement.
-- Button Tambah, Ubah, dan Hapus yang dimatikan di Builder juga ditolak di server, bukan hanya disembunyikan dari UI.
-- Security headers dipasang di setiap response (`X-Content-Type-Options`, `X-Frame-Options`, `Content-Security-Policy`, `Referrer-Policy`).
-- Builder dan Admin hanya bisa diakses dari localhost.
 
 ## Testing
 
-Test membutuhkan SQL Server dan akan membuat database terpisah bernama `Rakit_Test`, jadi database `Rakit` tidak tersentuh.
-
-```
+```bash
 dotnet test Rakit.slnx
 ```
 
-Kalau SQL Server Anda bukan `.\SQLEXPRESS`, set environment variable `RAKIT_TEST_CONN` (tanpa nama database), misalnya:
+Tests create their own `Rakit_Test` database on `.\SQLEXPRESS` and leave `Rakit` untouched. Set `RAKIT_TEST_CONN` to use another server.
 
-```powershell
-$env:RAKIT_TEST_CONN = "Server=NAMA_SERVER;Integrated Security=true;TrustServerCertificate=true"
-dotnet test Rakit.slnx
-```
+## Roadmap
 
-## Project Status
+- [x] Data sources, modules, menu, workflows, tracking, playground
+- [ ] Authentication and role-based access per module
+- [ ] Scheduled workflows
+- [ ] Audit log and log viewer
 
-Rakit masih dalam tahap development dan **belum siap di-deploy ke server publik**.
+Rakit is in early development and is not ready for production.
 
-Sudah tersedia:
+<details>
+<summary><b>Troubleshooting</b></summary>
 
-- Data source mode Table, Query, dan Stored Procedure.
-- Module Table, Form, Chart, Widget, dan Page, termasuk wizard "Buat dari tabel".
-- Menu dinamis dua level.
-- Workflow dengan delapan step type, visual canvas, single transaction, dan tracking.
-- SQL Playground dan stored procedure whitelist.
-
-Belum tersedia:
-
-- **Authentication dan role-based access.** Runtime page saat ini bisa dibuka siapa saja yang bisa menjangkau server. Config access di module sudah disimpan tapi belum di-enforce.
-- Workflow scheduling (misalnya menjalankan workflow setiap pagi).
-- Audit log perubahan config dan log viewer.
-- Dukungan database selain SQL Server, dan multi database.
-
-## Troubleshooting
-
-| Problem | Penyebab dan solusi |
+| Problem | Fix |
 |---|---|
-| Migration gagal karena tidak bisa connect ke server | Pastikan service SQL Server berjalan dan nama instance benar. Berikan connection string sebagai argument di command migration. |
-| Migration gagal karena tidak bisa create database | Akun Windows Anda belum punya permission create database. Minta role `dbcreator` atau jalankan dengan akun admin SQL Server. |
-| Aplikasi gagal start dengan pesan `MetadataConnectionString is required` | Connection string kosong. Pastikan aplikasi berjalan di environment `Development`, atau isi `ConnectionStrings` di `appsettings.json`. |
-| Builder menampilkan HTTP 403 | Builder dibuka dari komputer lain. Buka dari komputer tempat aplikasi berjalan, atau ubah `Rakit:Security:BuilderLocalOnly` khusus untuk environment development yang tertutup. |
-| Button Tambah, Ubah, atau Hapus tidak muncul | `Rakit:Db:AllowWrite` belum aktif, data source Insert/Update/Delete belum dipilih, key field belum diisi, atau button-nya dimatikan di tab Display. |
-| Page module menampilkan 404 | Module masih Draft. Publish dulu dari list module. |
-| Data source ditolak karena whitelist | Daftarkan stored procedure tersebut di **Admin > SP Whitelist** dan pastikan statusnya aktif. |
-| Step REST selalu gagal dengan pesan "tidak tersedia" | Host tujuan belum terdaftar di `Rakit:Workflow:AllowedHosts`. |
-| Email tidak terkirim | `Rakit:Mail:Host` belum diisi, jadi email hanya dicatat di log. Lengkapi config SMTP. |
-| Wizard "Buat dari tabel" tidak bisa membuat stored procedure | Aktifkan `Rakit:Playground:Enabled` dan `Rakit:Playground:AllowWrite`. |
+| Migration cannot connect | Check that SQL Server is running and pass the right connection string. |
+| Migration cannot create the database | Your Windows account needs the `dbcreator` role. |
+| `MetadataConnectionString is required` on startup | Run in the `Development` environment, or fill in `ConnectionStrings`. |
+| Builder returns HTTP 403 | Open it from the machine the app runs on (`BuilderLocalOnly`). |
+| Add, edit or delete buttons are missing | Enable `AllowWrite`, choose the Insert/Update/Delete data sources, set the key field, and check the buttons on the Display tab. |
+| Module page returns 404 | The module is still a draft. Publish it. |
+| Stored procedure refused | Add it in **Admin > SP Whitelist**. |
+| REST step is "not available" | Add the host to `Rakit:Workflow:AllowedHosts`. |
+| Emails are not sent | Set `Rakit:Mail:Host`. |
+
+</details>
